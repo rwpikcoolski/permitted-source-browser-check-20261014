@@ -1,4 +1,4 @@
-name: Vista rendered jurisdiction directory acceptance
+name: Vista public directory frame acceptance
 
 on:
   workflow_dispatch:
@@ -96,6 +96,24 @@ jobs:
                 });
                 return {challengeWording:/verify you are human|checking your browser|access denied/i.test(text),vistaWordPresent:/\bVista\b/.test(text),explicitVistaCityWording:/city of vista|vista,?\s+(?:ca|california)/i.test(text),links:[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20),selectCount:document.querySelectorAll('select').length,iframeCount:document.querySelectorAll('iframe').length};
               });
+              const frames=[];
+              for(const frame of page.frames().slice(1,5)){
+                const u=new URL(frame.url());
+                if(!['https:','http:'].includes(u.protocol))continue;
+                const f={origin:u.origin,path:u.pathname,hasQuery:Boolean(u.search)};
+                try{const x=await frame.evaluate(()=>{
+                  const text=document.body?.innerText||'';
+                  const links=[...document.querySelectorAll('a[href]')].flatMap(a=>{
+                    const label=String(a.innerText||a.textContent||'').trim().replace(/\s+/g,' ');const u=new URL(a.href,location.href);
+                    if(!['http:','https:'].includes(u.protocol)||!(/(^|\.)vista\.gov$|(^|\.)cityofvista\.com$/i.test(u.hostname)||/^(?:City of )?Vista(?:,? (?:CA|California))?$/i.test(label)))return[];
+                    if(/chula vista|caseid|recordid|permitid|token|secret|key=/i.test(label+' '+u.href))return[];
+                    return[{label:label.length<80?label:'Vista publisher link',url:u.origin+u.pathname,hasQuery:Boolean(u.search)}];
+                  });
+                  return{vistaWordPresent:/\bVista\b/.test(text),explicitVistaCityWording:/city of vista|vista,?\s+(?:ca|california)/i.test(text),challengeWording:/verify you are human|access denied|checking your browser/i.test(text),links:[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20)};
+                });Object.assign(f,x);}catch{f.inspection='unavailable';}
+                frames.push(f);
+              }
+              report.publicFrames=frames;
               report.sourcePageKind = view.challengeWording ? 'publisher-challenge' : 'rendered-public-directory';
               report.vistaWordPresent = view.vistaWordPresent;
               report.explicitVistaCityWording = view.explicitVistaCityWording;
