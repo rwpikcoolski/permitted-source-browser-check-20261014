@@ -1,0 +1,111 @@
+name: Public-source browser transport acceptance
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: public-source-transport-acceptance
+  cancel-in-progress: false
+
+jobs:
+  browser-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Install official browser test dependency
+        run: |
+          npm install --ignore-scripts --no-package-lock playwright@1.64.1
+          npx playwright install --with-deps --no-shell chromium
+      - name: Verify U.S. network and test published public entry
+        run: |
+          node --input-type=module <<'NODE'
+          import { chromium } from 'playwright';
+          const report = {
+            checkedAt: new Date().toISOString(),
+            purpose: 'Public-source software transport acceptance only',
+            maximumBrowserSeconds: 70,
+            maximumSourceRequests: 80,
+            sourceRequests: 0,
+            sourceNavigationAttempts: 0,
+            countryVerified: false,
+            nonCloudflareNetworkVerified: false,
+            snapshotsSaved: false,
+            permitDataLogged: false,
+            sourceStatus: null,
+            sourcePageKind: 'not-visited',
+            browserClosed: false
+          };
+          let browser, context, deadline;
+          let stage = 'browser-start';
+          try {
+            browser = await chromium.launch({ channel: 'chromium', headless: true, chromiumSandbox: true });
+            deadline = setTimeout(() => void browser.close().catch(() => {}), 70000);
+            context = await browser.newContext({ acceptDownloads: false });
+            const page = await context.newPage();
+            page.setDefaultNavigationTimeout(30000);
+            stage = 'browser-country-control';
+            const control = await page.goto('https://www.cloudflare.com/cdn-cgi/trace', { waitUntil: 'domcontentloaded' });
+            const trace = await page.locator('body').innerText();
+            const country = trace.match(/(?:^|\n)loc=([A-Z]{2})\b/)?.[1];
+            if (control?.status() !== 200 || country !== 'US') throw Error('USA_NOT_VERIFIED');
+            stage = 'browser-network-control';
+            const networkResponse = await page.goto('https://ipwho.is/', { waitUntil: 'domcontentloaded' });
+            const network = JSON.parse(await page.locator('body').innerText());
+            if (networkResponse?.status() !== 200 || network.success !== true || network.country_code !== 'US') throw Error('USA_NETWORK_NOT_VERIFIED');
+            const asn = Number(network.connection?.asn);
+            const organization = String(network.connection?.org || network.connection?.isp || '');
+            if (!Number.isFinite(asn) || asn === 13335 || /cloudflare/i.test(organization)) throw Error('INDEPENDENT_NETWORK_NOT_VERIFIED');
+            report.countryVerified = true;
+            report.nonCloudflareNetworkVerified = true;
+            report.networkKind = /microsoft|azure/i.test(organization) ? 'Microsoft/Azure' : 'independent-provider';
+            console.log(JSON.stringify({ stage: 'ordinary-browser-USA-outside-Cloudflare-verified', sourceRequests: 0 }));
+            stage = 'published-source-navigation';
+            context.on('request', () => {
+              report.sourceRequests++;
+              if (report.sourceRequests > report.maximumSourceRequests) {
+                report.requestLimitReached = true;
+                void context.close().catch(() => {});
+              }
+            });
+            report.sourceNavigationAttempts = 1;
+            const response = await page.goto('https://cityworks.cityofvista.com/PublicPermits/template/login.aspx', { waitUntil: 'domcontentloaded' });
+            report.sourceStatus = response?.status() ?? null;
+            report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
+            if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
+              report.sourcePageKind = 'publisher-refusal';
+            } else if (report.sourceStatus === 522) {
+              report.sourcePageKind = 'origin-connection-timeout';
+            } else if (report.sourceStatus >= 200 && report.sourceStatus < 300) {
+              const view = await page.evaluate(() => {
+                const text = document.body?.innerText || '';
+                return {
+                  passwordField: Boolean(document.querySelector('input[type=password]')),
+                  loginWording: /log\s*in|sign\s*in/i.test(text),
+                  searchWording: /search\s+(?:for\s+)?(?:permit|case)|permit\s+search/i.test(text),
+                  guestWording: /continue\s+as\s+guest/i.test(text),
+                  challengeWording: /verify you are human|checking your browser|access denied/i.test(text)
+                };
+              });
+              report.sourcePageKind = view.challengeWording ? 'publisher-challenge' : view.passwordField && view.loginWording ? 'portal-login' : view.searchWording ? 'possible-public-search' : 'other-public-page';
+              report.loginFieldPresent = view.passwordField;
+              report.publicSearchWordingPresent = view.searchWording;
+              report.guestWordingPresent = view.guestWording;
+            } else {
+              report.sourcePageKind = 'other-http-response';
+            }
+          } catch (error) {
+            report.failedStage = stage;
+            report.errorKind = error?.name || 'Error';
+            report.sourcePageKind = report.sourcePageKind === 'not-visited' && report.sourceNavigationAttempts ? 'navigation-failed' : report.sourcePageKind;
+          } finally {
+            clearTimeout(deadline);
+            if (browser) {
+              await browser.close().catch(() => {});
+              report.browserClosed = !browser.isConnected();
+            }
+            console.log(JSON.stringify(report));
+            if (!report.countryVerified || !report.nonCloudflareNetworkVerified || !report.browserClosed) process.exitCode = 1;
+          }
+          NODE
