@@ -1,43 +1,122 @@
-name: Vista dedicated jurisdiction directory acceptance
+name: Vista rendered jurisdiction directory acceptance
 
 on:
   workflow_dispatch:
+
 permissions: {}
+
 concurrency:
   group: public-source-transport-acceptance
   cancel-in-progress: false
+
 jobs:
-  source-acceptance:
+  browser-acceptance:
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: 6
     steps:
-      - name: Verify U.S. network and inspect the published jurisdiction directory
+      - name: Install official browser test dependency
+        run: |
+          npm install --ignore-scripts --no-package-lock playwright@1.64.1
+          npx playwright install --with-deps --no-shell chromium
+      - name: Confirm installed official Chrome
+        run: |
+          command -v google-chrome
+          google-chrome --version
+      - name: Verify U.S. network and test published public entry
         run: |
           node --input-type=module <<'NODE'
-          const report={checkedAt:new Date().toISOString(),purpose:'Published SolarAPP public-page software access assessment',maximumOperationSeconds:70,maximumSourceRequests:2,sourceRequests:0,countryVerified:false,nonCloudflareNetworkVerified:false,permitDataLogged:false,snapshotsSaved:false,pages:[]};
-          const deadline=AbortSignal.timeout(70000);let stage='network-control';
+          import { chromium } from 'playwright';
+          const report = {
+            checkedAt: new Date().toISOString(),
+            purpose: 'Public-source software transport acceptance only',
+            maximumBrowserSeconds: 70,
+            maximumSourceRequests: 80,
+            sourceRequests: 0,
+            sourceNavigationAttempts: 0,
+            countryVerified: false,
+            nonCloudflareNetworkVerified: false,
+            snapshotsSaved: false,
+            permitDataLogged: false,
+            sourceStatus: null,
+            sourcePageKind: 'not-visited',
+            browserClosed: false
+          };
+          let browser, context, deadline;
+          let stage = 'browser-start';
           try {
-           const c=await fetch('https://ipwho.is/',{signal:deadline}); const n=await c.json();
-           const asn=Number(n.connection?.asn);const org=String(n.connection?.org||n.connection?.isp||'');
-           if(c.status!==200||n.success!==true||n.country_code!=='US')throw Error('USA_NOT_VERIFIED');
-           if(!Number.isFinite(asn)||asn<=0||asn===13335||!org||/cloudflare/i.test(org))throw Error('INDEPENDENT_NETWORK_NOT_VERIFIED');
-           report.countryVerified=true;report.nonCloudflareNetworkVerified=true;report.networkKind=/microsoft|azure/i.test(org)?'Microsoft/Azure':'independent-provider';
-           for(const url of ['https://www.gosolarapp.org/jurisdictions']){
-            stage='published-program-page';report.sourceRequests++;
-            const r=await fetch(url,{signal:deadline}); const page={requestedPage:new URL(url).pathname,status:r.status,retryAfter:Boolean(r.headers.get('retry-after')),finalOrigin:new URL(r.url).origin,finalPath:new URL(r.url).pathname};
-            if([401,403,406,429].includes(r.status)||page.retryAfter){await r.body?.cancel();page.pageKind='publisher-refusal';report.pages.push(page);break;}
-            if(!r.ok){await r.body?.cancel();page.pageKind='other-http-response';report.pages.push(page);continue;}
-            const reader=r.body.getReader();let size=0;const chunks=[];
-            while(true){const v=await reader.read();if(v.done)break;size+=v.value.length;if(size>2097152){await reader.cancel();throw Error('RESPONSE_LIMIT');}chunks.push(v.value);}
-            const text=Buffer.concat(chunks).toString('utf8');page.pageKind='public-jurisdiction-directory';page.explicitVistaCityWording=/city of vista|vista,?\s+(?:ca|california)/i.test(text);page.loginFormPresent=/type\s*=\s*['"]password['"]/i.test(text);page.explicitPublicPermitSearchWording=/public permit search|search permits|browse permits/i.test(text);page.challengeWording=/verify you are human|access denied|checking your browser/i.test(text);
-            const links=[];for(const m of text.matchAll(/href\s*=\s*["']([^"'<>]+)["']/gi)){
-             try{const u=new URL(m[1].replace(/&amp;/gi,'&'),r.url);if(u.protocol!=='https:'||!/(^|\.)vista\.gov$|(^|\.)cityofvista\.com$/i.test(u.hostname))continue;if(/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(u.href))continue;links.push({url:u.origin+u.pathname,hasQuery:Boolean(u.search)});}catch{}
+            browser = await chromium.launch({ channel: 'chrome', headless: true, chromiumSandbox: true });
+            deadline = setTimeout(() => void browser.close().catch(() => {}), 70000);
+            context = await browser.newContext({ acceptDownloads: false });
+            const page = await context.newPage();
+            page.setDefaultNavigationTimeout(30000);
+            stage = 'browser-country-control';
+            const control = await page.goto('https://www.cloudflare.com/cdn-cgi/trace', { waitUntil: 'domcontentloaded' });
+            const trace = await page.locator('body').innerText();
+            const country = trace.match(/(?:^|\n)loc=([A-Z]{2})\b/)?.[1];
+            if (control?.status() !== 200 || country !== 'US') throw Error('USA_NOT_VERIFIED');
+            stage = 'browser-network-control';
+            const networkResponse = await page.goto('https://ipwho.is/', { waitUntil: 'domcontentloaded' });
+            const network = await networkResponse.json();
+            if (networkResponse?.status() !== 200 || network.success !== true || network.country_code !== 'US') throw Error('USA_NETWORK_NOT_VERIFIED');
+            const asn = Number(network.connection?.asn);
+            const organization = String(network.connection?.org || network.connection?.isp || '');
+            if (!Number.isFinite(asn) || asn === 13335 || /cloudflare/i.test(organization)) throw Error('INDEPENDENT_NETWORK_NOT_VERIFIED');
+            report.countryVerified = true;
+            report.nonCloudflareNetworkVerified = true;
+            report.networkKind = /microsoft|azure/i.test(organization) ? 'Microsoft/Azure' : 'independent-provider';
+            console.log(JSON.stringify({ stage: 'ordinary-browser-USA-outside-Cloudflare-verified', sourceRequests: 0 }));
+            stage = 'published-source-navigation';
+            context.on('request', () => {
+              report.sourceRequests++;
+              if (report.sourceRequests > report.maximumSourceRequests) {
+                report.requestLimitReached = true;
+                void context.close().catch(() => {});
+              }
+            });
+            report.sourceNavigationAttempts = 1;
+            const response = await page.goto('https://www.gosolarapp.org/jurisdictions', { waitUntil: 'domcontentloaded' });
+            report.sourceStatus = response?.status() ?? null;
+            report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
+            if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
+              report.sourcePageKind = 'publisher-refusal';
+            } else if (report.sourceStatus === 522) {
+              report.sourcePageKind = 'origin-connection-timeout';
+            } else if (report.sourceStatus >= 200 && report.sourceStatus < 300) {
+              await page.getByText(/^Vista$/i).first().waitFor({state:'visible',timeout:8000}).catch(()=>{});
+              const view = await page.evaluate(() => {
+                const text = document.body?.innerText || '';
+                const links = [...document.querySelectorAll('a[href]')].flatMap(a => {
+                  const label = String(a.innerText || a.textContent || '').trim().replace(/\s+/g,' ');
+                  const u = new URL(a.href, location.href);
+                  const cityHost = /(^|\.)vista\.gov$|(^|\.)cityofvista\.com$/i.test(u.hostname);
+                  const cityLabel = /^(?:City of )?Vista(?:,? (?:CA|California))?$/i.test(label);
+                  if (!['http:','https:'].includes(u.protocol) || (!cityHost && !cityLabel) || /chula vista/i.test(label)) return [];
+                  if (/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(u.href)) return [];
+                  return [{label:cityLabel?label:'Vista publisher link',url:u.origin+u.pathname,hasQuery:Boolean(u.search)}];
+                });
+                return {challengeWording:/verify you are human|checking your browser|access denied/i.test(text),vistaWordPresent:/\bVista\b/.test(text),explicitVistaCityWording:/city of vista|vista,?\s+(?:ca|california)/i.test(text),links:[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20),selectCount:document.querySelectorAll('select').length,iframeCount:document.querySelectorAll('iframe').length};
+              });
+              report.sourcePageKind = view.challengeWording ? 'publisher-challenge' : 'rendered-public-directory';
+              report.vistaWordPresent = view.vistaWordPresent;
+              report.explicitVistaCityWording = view.explicitVistaCityWording;
+              report.publishedVistaLinks = view.challengeWording ? [] : view.links;
+              report.selectCount = view.selectCount;report.iframeCount = view.iframeCount;
+            } else {
+              report.sourcePageKind = 'other-http-response';
             }
-            page.publishedLinks=page.challengeWording?[]:[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20);
-            page.scriptCount=(text.match(/<script\b/gi)||[]).length;
-            report.pages.push(page);if(page.challengeWording)break;
-           }
-          }catch(e){report.failedStage=stage;report.errorKind=e.name;report.errorCategory=/USA_NOT_VERIFIED/.test(String(e.message))?'country-not-US':/INDEPENDENT_NETWORK_NOT_VERIFIED/.test(String(e.message))?'network-not-independent':/Timeout|Abort/.test(e.name)?'operation-deadline':/RESPONSE_LIMIT/.test(String(e.message))?'response-boundary':'other-runtime-error';}
-          finally{console.log(JSON.stringify(report));if(!report.countryVerified||!report.nonCloudflareNetworkVerified)process.exitCode=1;}
-          
+          } catch (error) {
+            report.failedStage = stage;
+            report.errorKind = error?.name || 'Error';
+            const detail = String(error?.message || '');
+            report.errorCategory = /sandbox|SUID|namespace/i.test(detail) ? 'sandbox-startup-failure' : /Executable doesn.t exist/i.test(detail) ? 'browser-executable-missing' : /USA_NOT_VERIFIED/.test(detail) ? 'country-not-US' : /USA_NETWORK_NOT_VERIFIED/.test(detail) ? 'network-control-not-US' : /INDEPENDENT_NETWORK_NOT_VERIFIED/.test(detail) ? 'network-not-independent' : /net::ERR_CERT|certificate/i.test(detail) ? 'certificate-validation-failed' : /Timeout|timeout/.test(detail) ? 'navigation-timeout' : 'other-runtime-error';
+            report.sourcePageKind = report.sourcePageKind === 'not-visited' && report.sourceNavigationAttempts ? 'navigation-failed' : report.sourcePageKind;
+          } finally {
+            clearTimeout(deadline);
+            if (browser) {
+              await browser.close().catch(() => {});
+              report.browserClosed = !browser.isConnected();
+            }
+            console.log(JSON.stringify(report));
+            if (!report.countryVerified || !report.nonCloudflareNetworkVerified || !report.browserClosed) process.exitCode = 1;
+          }
           NODE
