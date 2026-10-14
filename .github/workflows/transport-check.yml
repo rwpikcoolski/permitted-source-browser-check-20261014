@@ -1,4 +1,4 @@
-name: Vista directory render diagnosis
+name: Vista published homepage navigation diagnosis
 
 on:
   workflow_dispatch:
@@ -74,7 +74,7 @@ jobs:
               }
             });
             report.sourceNavigationAttempts = 1;
-            const response = await page.goto('https://www.gosolarapp.org/jurisdictions', { waitUntil: 'domcontentloaded' });
+            const response = await page.goto('https://www.gosolarapp.org/', { waitUntil: 'domcontentloaded' });
             report.sourceStatus = response?.status() ?? null;
             report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
             if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
@@ -90,9 +90,9 @@ jobs:
                   const u = new URL(a.href, location.href);
                   const cityHost = /(^|\.)vista\.gov$|(^|\.)cityofvista\.com$/i.test(u.hostname);
                   const cityLabel = /^(?:City of )?Vista(?:,? (?:CA|California))?$/i.test(label);
-                  if (!['http:','https:'].includes(u.protocol) || (!cityHost && !cityLabel) || /chula vista/i.test(label)) return [];
+                  if (!['http:','https:'].includes(u.protocol) || (!cityHost && !cityLabel && !/participating|available|find your|map|jurisdiction/i.test(label)) || /chula vista/i.test(label)) return [];
                   if (/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(u.href)) return [];
-                  return [{label:cityLabel?label:'Vista publisher link',url:u.origin+u.pathname,hasQuery:Boolean(u.search)}];
+                  return [{label:label.length<100?label:'Public navigation link',url:u.origin+u.pathname,hasQuery:Boolean(u.search)}];
                 });
                 const frames=[...document.querySelectorAll('iframe')].map(f=>{const src=f.getAttribute('src')||'';let origin=null,path=null;try{const u=new URL(src,location.href);if(['http:','https:'].includes(u.protocol)){origin=u.origin;path=u.pathname;}}catch{}const r=f.getBoundingClientRect();return{srcPresent:Boolean(src),srcdocPresent:f.hasAttribute('srcdoc'),origin,path,visible:r.width>0&&r.height>0};});return {title:document.title.slice(0,150),heading:[...document.querySelectorAll('h1,h2')].map(h=>(h.innerText||'').slice(0,100)).slice(0,6),textLength:text.length,frames,challengeWording:/verify you are human|checking your browser|access denied/i.test(text),vistaWordPresent:/\bVista\b/i.test(text),explicitVistaCityWording:/city of vista|vista,?\s+(?:ca|california)/i.test(text),links:[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20),selectCount:document.querySelectorAll('select').length,iframeCount:document.querySelectorAll('iframe').length};
               });
@@ -100,7 +100,7 @@ jobs:
               report.pageIdentity={title:view.title,headings:view.heading,textLength:view.textLength,frames:view.frames};
               report.vistaWordPresent = view.vistaWordPresent;
               report.explicitVistaCityWording = view.explicitVistaCityWording;
-              report.publishedVistaLinks = view.challengeWording ? [] : view.links;
+              report.publishedNavigationLinks = view.challengeWording ? [] : view.links;
               report.selectCount = view.selectCount;report.iframeCount = view.iframeCount;
             } else {
               report.sourcePageKind = 'other-http-response';
