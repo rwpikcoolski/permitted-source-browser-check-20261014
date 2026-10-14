@@ -1,4 +1,4 @@
-name: Vista permit-map ownership acceptance
+name: Vista published SolarAPP route acceptance
 
 on:
   workflow_dispatch:
@@ -74,7 +74,7 @@ jobs:
               }
             });
             report.sourceNavigationAttempts = 1;
-            const response = await page.goto('https://www.arcgis.com/sharing/rest/content/items/2a33295b41df4d2e87fda301fff140cc?f=json', { waitUntil: 'domcontentloaded' });
+            const response = await page.goto('https://index.commoncrawl.org/CC-MAIN-2026-39-index?url=www.vista.gov%2Fcity-services%2Fcommunity-development%2Fpermits-forms%2Fsolarapp&matchType=exact&output=json', { waitUntil: 'domcontentloaded' });
             report.sourceStatus = response?.status() ?? null;
             report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
             if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
@@ -82,14 +82,12 @@ jobs:
             } else if (report.sourceStatus === 522) {
               report.sourcePageKind = 'origin-connection-timeout';
             } else if (report.sourceStatus >= 200 && report.sourceStatus < 300) {
-              const item = await response.json();
-              report.sourcePageKind = item.error ? 'public-item-unavailable' : 'public-item-metadata';
-              report.itemMetadata = item.error ? { errorCode: item.error.code } : {
-                id: item.id, title: item.title, owner: item.owner, type: item.type, access: item.access,
-                modified: item.modified, orgId: item.orgId || null,
-                serviceUrl: typeof item.url === 'string' ? new URL(item.url).origin + new URL(item.url).pathname : null,
-                descriptionMentionsVista: /\b(?:city of vista|vista,? california)\b/i.test(String(item.description || '') + ' ' + String(item.snippet || ''))
-              };
+              const body = await response.text();
+              const captures = body.trim().split(/\n+/).filter(Boolean).flatMap(line => {
+                try { const c = JSON.parse(line); return [{ timestamp: c.timestamp, status: c.status, mime: c.mime, filename: c.filename, offset: c.offset, length: c.length }]; } catch { return []; }
+              }).slice(0,5);
+              report.sourcePageKind = captures.length ? 'public-guide-capture-metadata' : 'no-guide-capture-metadata';
+              report.guideCaptures = captures;
             } else {
               report.sourcePageKind = 'other-http-response';
             }
