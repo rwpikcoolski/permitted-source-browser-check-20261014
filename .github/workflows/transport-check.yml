@@ -1,4 +1,4 @@
-name: Vista new City-published hosted portal acceptance
+name: Vista new hosted portal rendered-login acceptance
 
 on:
   workflow_dispatch:
@@ -82,7 +82,7 @@ jobs:
             } else if (report.sourceStatus === 522) {
               report.sourcePageKind = 'origin-connection-timeout';
             } else if (report.sourceStatus >= 200 && report.sourceStatus < 300) {
-              await page.waitForLoadState('load',{timeout:8000}).catch(()=>{});
+              stage='published-login-render';await page.locator('input[type=password]').waitFor({state:'visible',timeout:15000});report.loginRendered=true;
               const view = await page.evaluate(() => {
                 const text = document.body?.innerText || '';
                 const links = [...document.querySelectorAll('a[href]')].flatMap(a => {
