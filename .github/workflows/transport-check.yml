@@ -1,8 +1,7 @@
-name: Vista published guide link acceptance
+name: Vista SolarAPP public access acceptance
 
 on:
   workflow_dispatch:
-
 permissions: {}
 concurrency:
   group: public-source-transport-acceptance
@@ -12,41 +11,33 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Verify U.S. network and read exact public guide bytes
+      - name: Verify U.S. network and assess the City-published SolarAPP pages
         run: |
           node --input-type=module <<'NODE'
-          import { gunzipSync } from 'node:zlib';
-          const report={checkedAt:new Date().toISOString(),purpose:'Public guide link extraction for software source assessment',maximumOperationSeconds:70,maximumSourceRequests:2,sourceRequests:0,browserUsed:false,countryVerified:false,nonCloudflareNetworkVerified:false,permitDataLogged:false,snapshotsSaved:false,sourcePageKind:'not-read'};
-          const deadline=AbortSignal.timeout(70000); let stage='network-control';
+          const report={checkedAt:new Date().toISOString(),purpose:'Published SolarAPP public-page software access assessment',maximumOperationSeconds:70,maximumSourceRequests:2,sourceRequests:0,countryVerified:false,nonCloudflareNetworkVerified:false,permitDataLogged:false,snapshotsSaved:false,pages:[]};
+          const deadline=AbortSignal.timeout(70000);let stage='network-control';
           try {
-           const control=await fetch('https://ipwho.is/',{signal:deadline}); const n=await control.json();
-           if(control.status!==200||n.success!==true||n.country_code!=='US')throw Error('USA_NOT_VERIFIED');
+           const c=await fetch('https://ipwho.is/',{signal:deadline}); const n=await c.json();
            const asn=Number(n.connection?.asn);const org=String(n.connection?.org||n.connection?.isp||'');
-           if(!Number.isFinite(asn)||asn===13335||/cloudflare/i.test(org))throw Error('INDEPENDENT_NETWORK_NOT_VERIFIED');
+           if(c.status!==200||n.success!==true||n.country_code!=='US')throw Error('USA_NOT_VERIFIED');
+           if(!Number.isFinite(asn)||asn<=0||asn===13335||!org||/cloudflare/i.test(org))throw Error('INDEPENDENT_NETWORK_NOT_VERIFIED');
            report.countryVerified=true;report.nonCloudflareNetworkVerified=true;report.networkKind=/microsoft|azure/i.test(org)?'Microsoft/Azure':'independent-provider';
-           stage='published-guide-bytes';report.sourceRequests=1;
-           const expectedLength=34489;
-           const r=await fetch('https://data.commoncrawl.org/crawl-data/CC-MAIN-2026-34/segments/1786091385821.41/warc/CC-MAIN-20260815060346-20260815090346-00733.warc.gz',{headers:{Range:'bytes=937953827-937988315'},signal:deadline});
-           report.sourceStatus=r.status;report.sourceRetryAfter=Boolean(r.headers.get('retry-after'));
-           if(r.status!==206||report.sourceRetryAfter||Number(r.headers.get('content-length'))!==expectedLength){report.sourcePageKind='range-not-accepted';await r.body?.cancel();}
-           else {
+           for(const url of ['https://www.gosolarapp.org/','https://gosolarapp.org/login']){
+            stage='published-program-page';report.sourceRequests++;
+            const r=await fetch(url,{signal:deadline}); const page={requestedPage:new URL(url).pathname,status:r.status,retryAfter:Boolean(r.headers.get('retry-after')),finalOrigin:new URL(r.url).origin,finalPath:new URL(r.url).pathname};
+            if([401,403,406,429].includes(r.status)||page.retryAfter){await r.body?.cancel();page.pageKind='publisher-refusal';report.pages.push(page);break;}
+            if(!r.ok){await r.body?.cancel();page.pageKind='other-http-response';report.pages.push(page);continue;}
             const reader=r.body.getReader();let size=0;const chunks=[];
-            while(true){const p=await reader.read();if(p.done)break;size+=p.value.length;if(size>expectedLength){await reader.cancel();throw Error('RESPONSE_LIMIT');}chunks.push(p.value);}
-            if(size!==expectedLength)throw Error('INCOMPLETE_RANGE');
-            const raw=gunzipSync(Buffer.concat(chunks),{maxOutputLength:2097152}).toString('utf8');
-            report.sourcePageKind='public-guide-links';report.guideCaptureAt='2026-08-15T06:21:29Z';
-            const links=[];
-            for(const m of raw.matchAll(/href\s*=\s*["']([^"'<>]+)["']/gi)){
-             const href=m[1].replace(/&amp;/gi,'&').replace(/&#(\d+);/g,(_,v)=>String.fromCharCode(Number(v)));
-             try {const u=new URL(href,'https://www.vista.gov/city-services/community-development/permits-forms/solarapp');
-              if(!['https:','http:'].includes(u.protocol)||!/cityworks|solarapp|permit portal|online permit/i.test(u.hostname+u.pathname))continue;
-              if(/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(u.href))continue;
-              links.push({url:u.origin+u.pathname,hasQuery:Boolean(u.search)});
-             }catch{}
+            while(true){const v=await reader.read();if(v.done)break;size+=v.value.length;if(size>2097152){await reader.cancel();throw Error('RESPONSE_LIMIT');}chunks.push(v.value);}
+            const text=Buffer.concat(chunks).toString('utf8');page.pageKind='public-program-page';page.loginFormPresent=/type\s*=\s*['"]password['"]/i.test(text);page.explicitPublicPermitSearchWording=/public permit search|search permits|browse permits/i.test(text);page.challengeWording=/verify you are human|access denied|checking your browser/i.test(text);
+            const links=[];for(const m of text.matchAll(/href\s*=\s*["']([^"'<>]+)["']/gi)){
+             try{const u=new URL(m[1].replace(/&amp;/gi,'&'),r.url);if(u.protocol!=='https:'||!/permit|project|dashboard|api|login|sign-up|jurisdiction/i.test(u.pathname))continue;if(/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(u.href))continue;links.push({url:u.origin+u.pathname,hasQuery:Boolean(u.search)});}catch{}
             }
-            report.publishedPortalLinks=[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20);
+            page.publishedLinks=page.challengeWording?[]:[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20);
+            page.scriptPaths=[...text.matchAll(/<script[^>]+src\s*=\s*['"]([^'"]+)['"]/gi)].flatMap(m=>{try{const u=new URL(m[1],r.url);return u.protocol==='https:'&&/gosolarapp\.org$/.test(u.hostname)?[u.origin+u.pathname]:[];}catch{return[];}}).slice(0,5);
+            report.pages.push(page);if(page.challengeWording)break;
            }
-          }catch(e){report.failedStage=stage;report.errorKind=e.name;report.errorCategory=/USA_NOT_VERIFIED/.test(String(e.message))?'country-not-US':/INDEPENDENT_NETWORK_NOT_VERIFIED/.test(String(e.message))?'network-not-independent':/Timeout|Abort/.test(e.name)?'operation-deadline':/RESPONSE_LIMIT|INCOMPLETE_RANGE/.test(String(e.message))?'response-boundary':'other-runtime-error';}
+          }catch(e){report.failedStage=stage;report.errorKind=e.name;report.errorCategory=/USA_NOT_VERIFIED/.test(String(e.message))?'country-not-US':/INDEPENDENT_NETWORK_NOT_VERIFIED/.test(String(e.message))?'network-not-independent':/Timeout|Abort/.test(e.name)?'operation-deadline':/RESPONSE_LIMIT/.test(String(e.message))?'response-boundary':'other-runtime-error';}
           finally{console.log(JSON.stringify(report));if(!report.countryVerified||!report.nonCloudflareNetworkVerified)process.exitCode=1;}
           
           NODE
