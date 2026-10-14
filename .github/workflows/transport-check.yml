@@ -1,4 +1,4 @@
-name: Public-source browser transport acceptance
+name: Vista published-guide browser acceptance
 
 on:
   workflow_dispatch:
@@ -74,7 +74,7 @@ jobs:
               }
             });
             report.sourceNavigationAttempts = 1;
-            const response = await page.goto('https://cityworks.cityofvista.com/PublicPermits/template/login.aspx', { waitUntil: 'domcontentloaded' });
+            const response = await page.goto('https://www.vista.gov/departments/community-development/building', { waitUntil: 'domcontentloaded' });
             report.sourceStatus = response?.status() ?? null;
             report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
             if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
@@ -89,13 +89,21 @@ jobs:
                   loginWording: /log\s*in|sign\s*in/i.test(text),
                   searchWording: /search\s+(?:for\s+)?(?:permit|case)|permit\s+search/i.test(text),
                   guestWording: /continue\s+as\s+guest/i.test(text),
-                  challengeWording: /verify you are human|checking your browser|access denied/i.test(text)
+                  challengeWording: /verify you are human|checking your browser|access denied/i.test(text),
+                  publishedPortalLinks: [...document.querySelectorAll('a[href]')].flatMap(a => {
+                    const label = a.textContent || '';
+                    const url = new URL(a.href, location.href);
+                    if (url.protocol !== 'https:' || !/cityworks|permit portal|online permit|public access/i.test(label + ' ' + url.hostname + url.pathname)) return [];
+                    if (/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(url.href)) return [];
+                    return [{url: url.origin + url.pathname, hasQuery: Boolean(url.search)}];
+                  }).slice(0,20)
                 };
               });
               report.sourcePageKind = view.challengeWording ? 'publisher-challenge' : view.passwordField && view.loginWording ? 'portal-login' : view.searchWording ? 'possible-public-search' : 'other-public-page';
               report.loginFieldPresent = view.passwordField;
               report.publicSearchWordingPresent = view.searchWording;
               report.guestWordingPresent = view.guestWording;
+              report.publishedPortalLinks = view.challengeWording ? [] : view.publishedPortalLinks;
             } else {
               report.sourcePageKind = 'other-http-response';
             }
