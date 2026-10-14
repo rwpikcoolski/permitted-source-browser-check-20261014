@@ -1,4 +1,4 @@
-name: Vista published-navigation browser acceptance
+name: Vista permit-map ownership acceptance
 
 on:
   workflow_dispatch:
@@ -74,7 +74,7 @@ jobs:
               }
             });
             report.sourceNavigationAttempts = 1;
-            const response = await page.goto('https://www.vista.gov/?vm=r', { waitUntil: 'domcontentloaded' });
+            const response = await page.goto('https://www.arcgis.com/sharing/rest/content/items/2a33295b41df4d2e87fda301fff140cc?f=json', { waitUntil: 'domcontentloaded' });
             report.sourceStatus = response?.status() ?? null;
             report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
             if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
@@ -82,28 +82,14 @@ jobs:
             } else if (report.sourceStatus === 522) {
               report.sourcePageKind = 'origin-connection-timeout';
             } else if (report.sourceStatus >= 200 && report.sourceStatus < 300) {
-              const view = await page.evaluate(() => {
-                const text = document.body?.innerText || '';
-                return {
-                  passwordField: Boolean(document.querySelector('input[type=password]')),
-                  loginWording: /log\s*in|sign\s*in/i.test(text),
-                  searchWording: /search\s+(?:for\s+)?(?:permit|case)|permit\s+search/i.test(text),
-                  guestWording: /continue\s+as\s+guest/i.test(text),
-                  challengeWording: /verify you are human|checking your browser|access denied/i.test(text),
-                  publishedPortalLinks: [...document.querySelectorAll('a[href]')].flatMap(a => {
-                    const label = a.textContent || '';
-                    const url = new URL(a.href, location.href);
-                    if (url.protocol !== 'https:' || !/cityworks|building|permit|public access/i.test(label + ' ' + url.hostname + url.pathname)) return [];
-                    if (/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(url.href)) return [];
-                    return [{url: url.origin + url.pathname, hasQuery: Boolean(url.search)}];
-                  }).slice(0,20)
-                };
-              });
-              report.sourcePageKind = view.challengeWording ? 'publisher-challenge' : view.passwordField && view.loginWording ? 'portal-login' : view.searchWording ? 'possible-public-search' : 'other-public-page';
-              report.loginFieldPresent = view.passwordField;
-              report.publicSearchWordingPresent = view.searchWording;
-              report.guestWordingPresent = view.guestWording;
-              report.publishedPortalLinks = view.challengeWording ? [] : view.publishedPortalLinks;
+              const item = await response.json();
+              report.sourcePageKind = item.error ? 'public-item-unavailable' : 'public-item-metadata';
+              report.itemMetadata = item.error ? { errorCode: item.error.code } : {
+                id: item.id, title: item.title, owner: item.owner, type: item.type, access: item.access,
+                modified: item.modified, orgId: item.orgId || null,
+                serviceUrl: typeof item.url === 'string' ? new URL(item.url).origin + new URL(item.url).pathname : null,
+                descriptionMentionsVista: /\b(?:city of vista|vista,? california)\b/i.test(String(item.description || '') + ' ' + String(item.snippet || ''))
+              };
             } else {
               report.sourcePageKind = 'other-http-response';
             }
