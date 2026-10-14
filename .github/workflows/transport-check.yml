@@ -1,4 +1,4 @@
-name: Vista published installer availability route
+name: Vista published Where Available route
 
 on:
   workflow_dispatch:
@@ -74,7 +74,7 @@ jobs:
               }
             });
             report.sourceNavigationAttempts = 1;
-            const response = await page.goto('https://www.gosolarapp.org/installers', { waitUntil: 'domcontentloaded' });
+            const response = await page.goto('https://www.gosolarapp.org/where-is-solarapp-available', { waitUntil: 'domcontentloaded' });
             report.sourceStatus = response?.status() ?? null;
             report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
             if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
@@ -96,7 +96,7 @@ jobs:
                 });
                 const vistaNodes=[...document.querySelectorAll('a,span,h2,h3,h4,p,div')].filter(e=>/^(?:City of )?Vista(?:\s*,?\s*(?:CA|California))?$/i.test((e.innerText||'').trim())).slice(0,5);const vistaRows=vistaNodes.map(e=>{const row=e.closest('.w-dyn-item')||e.parentElement;return{nodeTag:e.tagName,collectionRow:Boolean(e.closest('.w-dyn-item')),publishedLinks:[...row.querySelectorAll('a[href]')].flatMap(a=>{const u=new URL(a.href,location.href);return ['https:','http:'].includes(u.protocol)&&!/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(u.href)?[{label:(a.innerText||'').trim().slice(0,100),url:u.origin+u.pathname,hasQuery:Boolean(u.search)}]:[]})};});const frames=[...document.querySelectorAll('iframe')].map(f=>{const src=f.getAttribute('src')||'';let origin=null,path=null;try{const u=new URL(src,location.href);if(['http:','https:'].includes(u.protocol)){origin=u.origin;path=u.pathname;}}catch{}const r=f.getBoundingClientRect();return{srcPresent:Boolean(src),srcdocPresent:f.hasAttribute('srcdoc'),origin,path,visible:r.width>0&&r.height>0};});return {vistaRows,title:document.title.slice(0,150),heading:[...document.querySelectorAll('h1,h2')].map(h=>(h.innerText||'').slice(0,100)).slice(0,6),textLength:text.length,frames,challengeWording:/verify you are human|checking your browser|access denied/i.test(text),vistaWordPresent:/\bVista\b/i.test(text),explicitVistaCityWording:/city of vista|vista,?\s+(?:ca|california)/i.test(text),links:[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20),selectCount:document.querySelectorAll('select').length,iframeCount:document.querySelectorAll('iframe').length};
               });
-              report.sourcePageKind = view.challengeWording ? 'publisher-challenge' : 'rendered-installer-availability';
+              report.sourcePageKind = view.challengeWording ? 'publisher-challenge' : 'rendered-published-availability';
               report.vistaAvailabilityRows=view.vistaRows;report.pageIdentity={title:view.title,headings:view.heading,textLength:view.textLength,frames:view.frames};
               report.vistaWordPresent = view.vistaWordPresent;
               report.explicitVistaCityWording = view.explicitVistaCityWording;
