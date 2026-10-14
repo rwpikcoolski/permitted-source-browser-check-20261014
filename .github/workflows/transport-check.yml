@@ -74,7 +74,7 @@ jobs:
               }
             });
             report.sourceNavigationAttempts = 1;
-            const response = await page.goto('https://index.commoncrawl.org/CC-MAIN-2026-39-index?url=www.vista.gov%2Fcity-services%2Fcommunity-development%2Fpermits-forms%2Fsolarapp&matchType=exact&output=json', { waitUntil: 'domcontentloaded' });
+            const response = await page.goto('https://index.commoncrawl.org/CC-MAIN-2026-34-index?url=www.vista.gov%2Fcity-services%2Fcommunity-development%2Fpermits-forms%2Fsolarapp&matchType=exact&output=json', { waitUntil: 'domcontentloaded' });
             report.sourceStatus = response?.status() ?? null;
             report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
             if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
