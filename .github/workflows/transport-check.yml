@@ -1,109 +1,52 @@
-name: Vista published SolarAPP route acceptance
+name: Vista published guide link acceptance
 
 on:
   workflow_dispatch:
 
 permissions: {}
-
 concurrency:
   group: public-source-transport-acceptance
   cancel-in-progress: false
-
 jobs:
-  browser-acceptance:
+  source-acceptance:
     runs-on: ubuntu-24.04
-    timeout-minutes: 6
+    timeout-minutes: 2
     steps:
-      - name: Install official browser test dependency
-        run: |
-          npm install --ignore-scripts --no-package-lock playwright@1.64.1
-          npx playwright install --with-deps --no-shell chromium
-      - name: Confirm installed official Chrome
-        run: |
-          command -v google-chrome
-          google-chrome --version
-      - name: Verify U.S. network and test published public entry
+      - name: Verify U.S. network and read exact public guide bytes
         run: |
           node --input-type=module <<'NODE'
-          import { chromium } from 'playwright';
-          const report = {
-            checkedAt: new Date().toISOString(),
-            purpose: 'Public-source software transport acceptance only',
-            maximumBrowserSeconds: 70,
-            maximumSourceRequests: 80,
-            sourceRequests: 0,
-            sourceNavigationAttempts: 0,
-            countryVerified: false,
-            nonCloudflareNetworkVerified: false,
-            snapshotsSaved: false,
-            permitDataLogged: false,
-            sourceStatus: null,
-            sourcePageKind: 'not-visited',
-            browserClosed: false
-          };
-          let browser, context, deadline;
-          let stage = 'browser-start';
+          import { gunzipSync } from 'node:zlib';
+          const report={checkedAt:new Date().toISOString(),purpose:'Public guide link extraction for software source assessment',maximumOperationSeconds:70,maximumSourceRequests:2,sourceRequests:0,browserUsed:false,countryVerified:false,nonCloudflareNetworkVerified:false,permitDataLogged:false,snapshotsSaved:false,sourcePageKind:'not-read'};
+          const deadline=AbortSignal.timeout(70000); let stage='network-control';
           try {
-            browser = await chromium.launch({ channel: 'chrome', headless: true, chromiumSandbox: true });
-            deadline = setTimeout(() => void browser.close().catch(() => {}), 70000);
-            context = await browser.newContext({ acceptDownloads: false });
-            const page = await context.newPage();
-            page.setDefaultNavigationTimeout(30000);
-            stage = 'browser-country-control';
-            const control = await page.goto('https://www.cloudflare.com/cdn-cgi/trace', { waitUntil: 'domcontentloaded' });
-            const trace = await page.locator('body').innerText();
-            const country = trace.match(/(?:^|\n)loc=([A-Z]{2})\b/)?.[1];
-            if (control?.status() !== 200 || country !== 'US') throw Error('USA_NOT_VERIFIED');
-            stage = 'browser-network-control';
-            const networkResponse = await page.goto('https://ipwho.is/', { waitUntil: 'domcontentloaded' });
-            const network = await networkResponse.json();
-            if (networkResponse?.status() !== 200 || network.success !== true || network.country_code !== 'US') throw Error('USA_NETWORK_NOT_VERIFIED');
-            const asn = Number(network.connection?.asn);
-            const organization = String(network.connection?.org || network.connection?.isp || '');
-            if (!Number.isFinite(asn) || asn === 13335 || /cloudflare/i.test(organization)) throw Error('INDEPENDENT_NETWORK_NOT_VERIFIED');
-            report.countryVerified = true;
-            report.nonCloudflareNetworkVerified = true;
-            report.networkKind = /microsoft|azure/i.test(organization) ? 'Microsoft/Azure' : 'independent-provider';
-            console.log(JSON.stringify({ stage: 'ordinary-browser-USA-outside-Cloudflare-verified', sourceRequests: 0 }));
-            stage = 'published-source-navigation';
-            context.on('request', () => {
-              report.sourceRequests++;
-              if (report.sourceRequests > report.maximumSourceRequests) {
-                report.requestLimitReached = true;
-                void context.close().catch(() => {});
-              }
-            });
-            report.sourceNavigationAttempts = 1;
-            const response = await page.goto('https://index.commoncrawl.org/CC-MAIN-2026-34-index?url=www.vista.gov%2Fcity-services%2Fcommunity-development%2Fpermits-forms%2Fsolarapp&matchType=exact&output=json', { waitUntil: 'domcontentloaded' });
-            report.sourceStatus = response?.status() ?? null;
-            report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
-            if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
-              report.sourcePageKind = 'publisher-refusal';
-            } else if (report.sourceStatus === 522) {
-              report.sourcePageKind = 'origin-connection-timeout';
-            } else if (report.sourceStatus >= 200 && report.sourceStatus < 300) {
-              const body = await response.text();
-              const captures = body.trim().split(/\n+/).filter(Boolean).flatMap(line => {
-                try { const c = JSON.parse(line); return [{ timestamp: c.timestamp, status: c.status, mime: c.mime, filename: c.filename, offset: c.offset, length: c.length }]; } catch { return []; }
-              }).slice(0,5);
-              report.sourcePageKind = captures.length ? 'public-guide-capture-metadata' : 'no-guide-capture-metadata';
-              report.guideCaptures = captures;
-            } else {
-              report.sourcePageKind = 'other-http-response';
+           const control=await fetch('https://ipwho.is/',{signal:deadline}); const n=await control.json();
+           if(control.status!==200||n.success!==true||n.country_code!=='US')throw Error('USA_NOT_VERIFIED');
+           const asn=Number(n.connection?.asn);const org=String(n.connection?.org||n.connection?.isp||'');
+           if(!Number.isFinite(asn)||asn===13335||/cloudflare/i.test(org))throw Error('INDEPENDENT_NETWORK_NOT_VERIFIED');
+           report.countryVerified=true;report.nonCloudflareNetworkVerified=true;report.networkKind=/microsoft|azure/i.test(org)?'Microsoft/Azure':'independent-provider';
+           stage='published-guide-bytes';report.sourceRequests=1;
+           const expectedLength=34489;
+           const r=await fetch('https://data.commoncrawl.org/crawl-data/CC-MAIN-2026-34/segments/1786091385821.41/warc/CC-MAIN-20260815060346-20260815090346-00733.warc.gz',{headers:{Range:'bytes=937953827-937988315'},signal:deadline});
+           report.sourceStatus=r.status;report.sourceRetryAfter=Boolean(r.headers.get('retry-after'));
+           if(r.status!==206||report.sourceRetryAfter||Number(r.headers.get('content-length'))!==expectedLength){report.sourcePageKind='range-not-accepted';await r.body?.cancel();}
+           else {
+            const reader=r.body.getReader();let size=0;const chunks=[];
+            while(true){const p=await reader.read();if(p.done)break;size+=p.value.length;if(size>expectedLength){await reader.cancel();throw Error('RESPONSE_LIMIT');}chunks.push(p.value);}
+            if(size!==expectedLength)throw Error('INCOMPLETE_RANGE');
+            const raw=gunzipSync(Buffer.concat(chunks),{maxOutputLength:2097152}).toString('utf8');
+            report.sourcePageKind='public-guide-links';report.guideCaptureAt='2026-08-15T06:21:29Z';
+            const links=[];
+            for(const m of raw.matchAll(/href\s*=\s*["']([^"'<>]+)["']/gi)){
+             const href=m[1].replace(/&amp;/gi,'&').replace(/&#(\d+);/g,(_,v)=>String.fromCharCode(Number(v)));
+             try {const u=new URL(href,'https://www.vista.gov/city-services/community-development/permits-forms/solarapp');
+              if(!['https:','http:'].includes(u.protocol)||!/cityworks|solarapp|permit portal|online permit/i.test(u.hostname+u.pathname))continue;
+              if(/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(u.href))continue;
+              links.push({url:u.origin+u.pathname,hasQuery:Boolean(u.search)});
+             }catch{}
             }
-          } catch (error) {
-            report.failedStage = stage;
-            report.errorKind = error?.name || 'Error';
-            const detail = String(error?.message || '');
-            report.errorCategory = /sandbox|SUID|namespace/i.test(detail) ? 'sandbox-startup-failure' : /Executable doesn.t exist/i.test(detail) ? 'browser-executable-missing' : /USA_NOT_VERIFIED/.test(detail) ? 'country-not-US' : /USA_NETWORK_NOT_VERIFIED/.test(detail) ? 'network-control-not-US' : /INDEPENDENT_NETWORK_NOT_VERIFIED/.test(detail) ? 'network-not-independent' : /net::ERR_CERT|certificate/i.test(detail) ? 'certificate-validation-failed' : /Timeout|timeout/.test(detail) ? 'navigation-timeout' : 'other-runtime-error';
-            report.sourcePageKind = report.sourcePageKind === 'not-visited' && report.sourceNavigationAttempts ? 'navigation-failed' : report.sourcePageKind;
-          } finally {
-            clearTimeout(deadline);
-            if (browser) {
-              await browser.close().catch(() => {});
-              report.browserClosed = !browser.isConnected();
-            }
-            console.log(JSON.stringify(report));
-            if (!report.countryVerified || !report.nonCloudflareNetworkVerified || !report.browserClosed) process.exitCode = 1;
-          }
+            report.publishedPortalLinks=[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20);
+           }
+          }catch(e){report.failedStage=stage;report.errorKind=e.name;report.errorCategory=/USA_NOT_VERIFIED/.test(String(e.message))?'country-not-US':/INDEPENDENT_NETWORK_NOT_VERIFIED/.test(String(e.message))?'network-not-independent':/Timeout|Abort/.test(e.name)?'operation-deadline':/RESPONSE_LIMIT|INCOMPLETE_RANGE/.test(String(e.message))?'response-boundary':'other-runtime-error';}
+          finally{console.log(JSON.stringify(report));if(!report.countryVerified||!report.nonCloudflareNetworkVerified)process.exitCode=1;}
+          
           NODE
