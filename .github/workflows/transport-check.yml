@@ -1,4 +1,4 @@
-name: Vista City guide published by SolarAPP
+name: Vista City-published canonical SolarAPP guide
 
 on:
   workflow_dispatch:
@@ -74,7 +74,7 @@ jobs:
               }
             });
             report.sourceNavigationAttempts = 1;
-            const response = await page.goto('http://www.cityofvista.com/city-services/community-development/permits-forms/solarapp', { waitUntil: 'domcontentloaded' });
+            const response = await page.goto('https://www.vista.gov/city-services/community-development/permits-forms/solarapp', { waitUntil: 'domcontentloaded' });
             report.sourceStatus = response?.status() ?? null;const destination=new URL(page.url());report.sourceDestination={origin:destination.origin,path:destination.pathname,hasQuery:Boolean(destination.search)};report.redirectCount=0;let prior=response?.request()?.redirectedFrom();while(prior){report.redirectCount++;prior=prior.redirectedFrom();}
             report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
             if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
