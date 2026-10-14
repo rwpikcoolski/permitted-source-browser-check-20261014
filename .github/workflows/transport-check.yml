@@ -1,4 +1,4 @@
-name: Vista published-guide browser acceptance
+name: Vista published-navigation browser acceptance
 
 on:
   workflow_dispatch:
@@ -74,7 +74,7 @@ jobs:
               }
             });
             report.sourceNavigationAttempts = 1;
-            const response = await page.goto('https://www.vista.gov/departments/community-development/building', { waitUntil: 'domcontentloaded' });
+            const response = await page.goto('https://www.vista.gov/?vm=r', { waitUntil: 'domcontentloaded' });
             report.sourceStatus = response?.status() ?? null;
             report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
             if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
@@ -93,7 +93,7 @@ jobs:
                   publishedPortalLinks: [...document.querySelectorAll('a[href]')].flatMap(a => {
                     const label = a.textContent || '';
                     const url = new URL(a.href, location.href);
-                    if (url.protocol !== 'https:' || !/cityworks|permit portal|online permit|public access/i.test(label + ' ' + url.hostname + url.pathname)) return [];
+                    if (url.protocol !== 'https:' || !/cityworks|building|permit|public access/i.test(label + ' ' + url.hostname + url.pathname)) return [];
                     if (/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(url.href)) return [];
                     return [{url: url.origin + url.pathname, hasQuery: Boolean(url.search)}];
                   }).slice(0,20)
