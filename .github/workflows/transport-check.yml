@@ -18,6 +18,10 @@ jobs:
         run: |
           npm install --ignore-scripts --no-package-lock playwright@1.64.1
           npx playwright install --with-deps --no-shell chromium
+      - name: Confirm installed official Chrome
+        run: |
+          command -v google-chrome
+          google-chrome --version
       - name: Verify U.S. network and test published public entry
         run: |
           node --input-type=module <<'NODE'
@@ -40,7 +44,7 @@ jobs:
           let browser, context, deadline;
           let stage = 'browser-start';
           try {
-            browser = await chromium.launch({ channel: 'chromium', headless: true, chromiumSandbox: true });
+            browser = await chromium.launch({ channel: 'chrome', headless: true, chromiumSandbox: true });
             deadline = setTimeout(() => void browser.close().catch(() => {}), 70000);
             context = await browser.newContext({ acceptDownloads: false });
             const page = await context.newPage();
@@ -52,7 +56,7 @@ jobs:
             if (control?.status() !== 200 || country !== 'US') throw Error('USA_NOT_VERIFIED');
             stage = 'browser-network-control';
             const networkResponse = await page.goto('https://ipwho.is/', { waitUntil: 'domcontentloaded' });
-            const network = JSON.parse(await page.locator('body').innerText());
+            const network = await networkResponse.json();
             if (networkResponse?.status() !== 200 || network.success !== true || network.country_code !== 'US') throw Error('USA_NETWORK_NOT_VERIFIED');
             const asn = Number(network.connection?.asn);
             const organization = String(network.connection?.org || network.connection?.isp || '');
@@ -98,6 +102,8 @@ jobs:
           } catch (error) {
             report.failedStage = stage;
             report.errorKind = error?.name || 'Error';
+            const detail = String(error?.message || '');
+            report.errorCategory = /sandbox|SUID|namespace/i.test(detail) ? 'sandbox-startup-failure' : /Executable doesn.t exist/i.test(detail) ? 'browser-executable-missing' : /USA_NOT_VERIFIED/.test(detail) ? 'country-not-US' : /USA_NETWORK_NOT_VERIFIED/.test(detail) ? 'network-control-not-US' : /INDEPENDENT_NETWORK_NOT_VERIFIED/.test(detail) ? 'network-not-independent' : /net::ERR_CERT|certificate/i.test(detail) ? 'certificate-validation-failed' : /Timeout|timeout/.test(detail) ? 'navigation-timeout' : 'other-runtime-error';
             report.sourcePageKind = report.sourcePageKind === 'not-visited' && report.sourceNavigationAttempts ? 'navigation-failed' : report.sourcePageKind;
           } finally {
             clearTimeout(deadline);
