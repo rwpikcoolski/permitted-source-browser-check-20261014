@@ -1,4 +1,4 @@
-name: Vista published hosted GIS metadata acceptance
+name: Vista public permit layer coverage assessment
 
 on:
   workflow_dispatch:
@@ -65,21 +65,16 @@ jobs:
             report.nonCloudflareNetworkVerified = true;
             report.networkKind = /microsoft|azure/i.test(organization) ? 'Microsoft/Azure' : 'independent-provider';
             console.log(JSON.stringify({ stage: 'ordinary-browser-USA-outside-Cloudflare-verified', sourceRequests: 0 }));
-            stage='published-public-gis-metadata';
+            stage='published-permit-layer';
             context.on('request',()=>{if(++report.sourceRequests>report.maximumSourceRequests)void context.close().catch(()=>{});});
-            const target='https://app06.cityworksonline.com/CLIENT_VistaCA-Office/gis/16/4700/rest/services/cw/FeatureServer?f=pjson';
-            const response=await page.goto(target,{waitUntil:'domcontentloaded'});
-            report.sourceNavigationAttempts=1;
-            report.sourceStatus=response?.status()??null;
-            report.sourceRetryAfter=Boolean(response?.headers()['retry-after']);
-            report.sourceDestination={origin:new URL(page.url()).origin,path:new URL(page.url()).pathname};
-            if([401,403,406,429].includes(report.sourceStatus)||report.sourceRetryAfter){report.sourcePageKind='publisher-refusal';}
-            else if(report.sourceStatus===200){
-              let data;try{data=await response.json()}catch{}
-              if(!data){report.sourcePageKind='non-json-response';report.passwordFieldPresent=await page.locator('input[type=password]').count()>0;}
-              else if(data.error){report.sourcePageKind='source-error';report.sourceError={code:data.error.code,message:String(data.error.message||'').slice(0,150)};}
-              else{report.sourcePageKind='public-gis-service-metadata';report.serviceVersion=data.currentVersion;report.layers=(data.layers||[]).map(x=>({id:x.id,name:x.name}));report.tables=(data.tables||[]).map(x=>({id:x.id,name:x.name}));report.capabilities=data.capabilities;}
-            }else report.sourcePageKind='other-http-response';
+            const base='https://app06.cityworksonline.com/CLIENT_VistaCA-Office/gis/16/4700/rest/services/cw/FeatureServer/5';
+            const read=async(url)=>{report.sourceNavigationAttempts++;const r=await page.goto(url,{waitUntil:'domcontentloaded'});const status=r?.status();if([401,403,406,429].includes(status)||r?.headers()['retry-after'])throw Error('SOURCE_REFUSAL');if(status!==200)throw Error('SOURCE_HTTP');let d;try{d=await r.json()}catch{throw Error('SOURCE_NOT_JSON')};if(d.error){report.sourceError={code:d.error.code,message:String(d.error.message||'').slice(0,150)};throw Error('SOURCE_ERROR')};return d;};
+            const meta=await read(base+'?f=pjson');
+            report.sourceStatus=200;report.sourcePageKind='public-permit-layer-metadata';
+            report.layer={name:meta.name,objectIdField:meta.objectIdField,capabilities:meta.capabilities,maxRecordCount:meta.maxRecordCount,supportedQueryFormats:meta.supportedQueryFormats,advancedQueryCapabilities:meta.advancedQueryCapabilities,fields:(meta.fields||[]).map(x=>({name:x.name,alias:x.alias,type:x.type,domain:x.domain?.codedValues?x.domain.codedValues.map(c=>({name:c.name,code:c.code})):undefined}))};
+            const count=await read(base+'/query?'+new URLSearchParams({f:'json',where:'1=1',returnCountOnly:'true'}));report.recordCount=count.count;
+            const dates=(meta.fields||[]).filter(x=>x.type==='esriFieldTypeDate').slice(0,12);
+            if(dates.length&&meta.advancedQueryCapabilities?.supportsStatistics){const statistics=dates.map((x,i)=>({statisticType:'max',onStatisticField:x.name,outStatisticFieldName:'maximum_'+i}));const q=await read(base+'/query?'+new URLSearchParams({f:'json',where:'1=1',returnGeometry:'false',outStatistics:JSON.stringify(statistics)}));const a=q.features?.[0]?.attributes||{};report.maximumDates=dates.map((x,i)=>({field:x.name,value:a['maximum_'+i]}));}
           } catch (error) {
             report.failedStage = stage;
             report.errorKind = error?.name || 'Error';
