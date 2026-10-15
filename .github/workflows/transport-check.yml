@@ -1,4 +1,4 @@
-name: Vista complete Enterprise public source catalog
+name: Vista published CommunityDevelopment admission
 on:
   workflow_dispatch:
 permissions: {}
@@ -12,17 +12,18 @@ jobs:
     steps:
       - name: Install official browser dependency
         run: npm install --ignore-scripts --no-package-lock playwright@1.64.1
-      - name: Read complete observed organization catalog with public service URLs
+      - name: Inspect City published public map service layers
         run: |
           node --input-type=module <<'NODE'
           import {chromium} from 'playwright';
-          const result={purpose:'Complete City Enterprise public item pagination and source references; no feature data',checkedAt:new Date().toISOString(),maximumBrowserSeconds:70,maximumSourceRequests:5,sourceRequests:0,browserClosed:false,rawRecordsLogged:false,tests:[]};let browser,timer;
+          const result={purpose:'Assess City-owned CWOL CommunityDevelopment map service for current building permits',checkedAt:new Date().toISOString(),maximumBrowserSeconds:70,maximumSourceRequests:3,sourceRequests:0,browserClosed:false,rawRecordsLogged:false,tests:[]};let browser,timer;
           try{
            browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});timer=setTimeout(()=>void browser.close().catch(()=>{}),70000);const context=await browser.newContext({acceptDownloads:false});const page=await context.newPage();
            const control=await page.goto('https://ipwho.is/',{waitUntil:'domcontentloaded',timeout:18000});const n=await control.json();if(control.status()!==200||n.success!==true||n.country_code!=='US'||Number(n.connection?.asn)===13335||/cloudflare/i.test(String(n.connection?.org||'')))throw Error('USA_NOT_VERIFIED');result.countryVerified='US';result.independentOfCloudflare=true;
            async function read(label,url){result.sourceRequests++;const r=await context.request.get(url,{timeout:18000,maxRedirects:0});const out={label,httpStatus:r.status(),retryAfter:r.headers()['retry-after']||null};result.tests.push(out);if([401,403,406,429].includes(r.status())||out.retryAfter){out.controlRespected=true;throw Error('SOURCE_CONTROL');}const text=await r.text();if(text.length>3000000)throw Error('SIZE');const j=JSON.parse(text);if(j.error){out.error={code:j.error.code,message:j.error.message};if([401,403,498,499].includes(j.error.code)){out.controlRespected=true;throw Error('SOURCE_CONTROL');}}return {j,out};}
-           let start=1;const ids=new Set();while(start>0&&result.sourceRequests<5){const search=new URL('https://gis.vista.gov/portal/sharing/rest/search');search.search=new URLSearchParams({f:'json',q:'orgid:0123456789ABCDEF AND access:public',num:'100',start:String(start),sortField:'modified',sortOrder:'desc'});const {j:c,out:co}=await read('city-public-catalog-page-'+start,search.href);co.total=c.total;co.start=c.start;co.nextStart=c.nextStart;co.items=(c.results||[]).map(x=>{ids.add(x.id);let url;try{const u=new URL(x.url);if(!/token|password|secret|api.?key/i.test(u.search))url=u.origin+u.pathname;}catch{}return {id:x.id,title:x.title,type:x.type,access:x.access,url};});start=c.nextStart;}
-           result.uniqueItems=ids.size;result.nextStart=start;result.catalogComplete=start===-1;
+           const base='https://gis.vista.gov/arcgis/rest/services/CWOL/CommunityDevelopment/MapServer';const {j:m,out:mo}=await read('published-public-map-service',base+'?f=json');mo.name=m.mapName;mo.capabilities=m.capabilities;mo.description=typeof m.description==='string'?m.description.slice(0,1000):null;mo.layers=m.layers?.map(x=>({id:x.id,name:x.name,parentLayerId:x.parentLayerId,subLayerIds:x.subLayerIds}));
+           const {j:d,out:lo}=await read('published-community-development-layer-schemas',base+'/layers?f=json');lo.layers=(d.layers||[]).map(x=>({id:x.id,name:x.name,type:x.type,capabilities:x.capabilities,supportsStatistics:x.supportsStatistics,advancedQueryCapabilities:x.advancedQueryCapabilities,fields:/permit|solar|building|case/i.test(x.name||'')?x.fields?.map(f=>({name:f.name,alias:f.alias,type:f.type})):undefined}));
+           const candidate=(d.layers||[]).find(x=>/permit|building/i.test(x.name||'')&&x.fields?.some(z=>z.type==='esriFieldTypeDate')&&(x.supportsStatistics||x.advancedQueryCapabilities?.supportsStatistics));if(candidate){const oid=candidate.fields.find(x=>x.type==='esriFieldTypeOID')?.name;const dates=candidate.fields.filter(x=>x.type==='esriFieldTypeDate'&&/appl|enter|issu|creat/i.test(x.name+' '+x.alias)&&!/condition|person|birth/i.test(x.name+' '+x.alias));if(oid&&dates.length){const stats=[{statisticType:'count',onStatisticField:oid,outStatisticFieldName:'record_count'},...dates.map((x,i)=>({statisticType:'max',onStatisticField:x.name,outStatisticFieldName:'max_date_'+i}))];const q=new URLSearchParams({f:'json',where:'1=1',outStatistics:JSON.stringify(stats),returnGeometry:'false'});const {j:g,out:go}=await read('published-permit-layer-aggregate',base+'/'+candidate.id+'/query?'+q);const a=g.features?.[0]?.attributes||{};go.layerId=candidate.id;go.recordCount=a.record_count;go.latestDates=dates.map((x,i)=>({field:x.name,alias:x.alias,value:Number.isFinite(a['max_date_'+i])?new Date(a['max_date_'+i]).toISOString():null}));}}
           }catch(e){const m=String(e?.message||'');result.failure=/USA_NOT_VERIFIED/.test(m)?'USA-not-verified':/SOURCE_CONTROL/.test(m)?'source-control-respected':/timeout|Timeout/.test(m)?'timeout':'runtime-error';}
           finally{clearTimeout(timer);if(browser){await browser.close().catch(()=>{});result.browserClosed=!browser.isConnected();}console.log(JSON.stringify(result));if(!result.countryVerified||!result.browserClosed)process.exitCode=1;}
           NODE
