@@ -1,4 +1,4 @@
-name: Vista published map source metadata
+name: Vista published permit layer admission
 on:
   workflow_dispatch:
 permissions: {}
@@ -12,27 +12,23 @@ jobs:
     steps:
       - name: Install official browser dependency
         run: npm install --ignore-scripts --no-package-lock playwright@1.64.1
-      - name: Inspect public map source metadata
+      - name: Assess published permit layer without raw record logging
         run: |
           node --input-type=module <<'NODE'
-          import { chromium } from 'playwright';
-          const result={purpose:'Inspect data sources explicitly linked by public Vista maps; metadata only',checkedAt:new Date().toISOString(),maximumBrowserSeconds:70,maximumSourceRequests:3,sourceRequests:0,browserClosed:false,rawRecordsLogged:false,results:[]};
-          let browser,timer;
+          import {chromium} from 'playwright';
+          const result={purpose:'Admission check of City-published Cityworks Permits map layer; metadata and aggregate dates only',checkedAt:new Date().toISOString(),maximumBrowserSeconds:70,maximumSourceRequests:2,sourceRequests:0,browserClosed:false,rawRecordsLogged:false,tests:[]};let browser,timer;
           try{
-           browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});timer=setTimeout(()=>void browser.close().catch(()=>{}),70000);
-           const context=await browser.newContext({acceptDownloads:false});const page=await context.newPage();
-           const control=await page.goto('https://ipwho.is/',{waitUntil:'domcontentloaded',timeout:18000});const n=await control.json();
-           if(control.status()!==200||n.success!==true||n.country_code!=='US'||Number(n.connection?.asn)===13335||/cloudflare/i.test(String(n.connection?.org||'')))throw Error('USA_NOT_VERIFIED');
-           result.countryVerified='US';result.independentOfCloudflare=true;
-           const sources=[{label:'public-plan-index',url:'https://gis.vista.gov/arcgis/rest/services/Hosted/Plan_Index_Data/FeatureServer/0'},{label:'public-planning-projects-view',url:'https://services3.arcgis.com/z9GvP47f4vbAXFVB/arcgis/rest/services/PlanningProjects_Points_view/FeatureServer'}];
-           for(let i=0;i<sources.length&&result.sourceRequests<3;i++){
-            const item=sources[i];result.sourceRequests++;const r=await context.request.get(item.url+'?f=pjson',{timeout:18000,maxRedirects:0});const out={label:item.label,httpStatus:r.status(),retryAfter:r.headers()['retry-after']||null};result.results.push(out);
-            if([401,403,406,429].includes(r.status())||out.retryAfter){out.controlRespected=true;break;}
-            const text=await r.text();if(text.length>1000000)throw Error('SIZE');let j;try{j=JSON.parse(text)}catch{out.format='not-json';continue;}
-            if(j.error){out.error={code:j.error.code,message:j.error.message};continue;}
-            out.name=j.name;out.fields=j.fields?.map(f=>({name:f.name,alias:f.alias,type:f.type}));out.description=j.description?.slice(0,1600);out.layers=j.layers?.map(l=>({id:l.id,name:l.name}));
-            if(item.label==='public-planning-projects-view'&&j.layers?.length===1){sources.push({label:'public-planning-projects-view-layer',url:item.url+'/'+j.layers[0].id});}
+           browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});timer=setTimeout(()=>void browser.close().catch(()=>{}),70000);const context=await browser.newContext({acceptDownloads:false});const page=await context.newPage();
+           const control=await page.goto('https://ipwho.is/',{waitUntil:'domcontentloaded',timeout:18000});const n=await control.json();if(control.status()!==200||n.success!==true||n.country_code!=='US'||Number(n.connection?.asn)===13335||/cloudflare/i.test(String(n.connection?.org||'')))throw Error('USA_NOT_VERIFIED');result.countryVerified='US';result.independentOfCloudflare=true;
+           const layer='https://gis.vista.gov/arcgis/rest/services/Internal/Permits/MapServer/10';
+           async function read(label,url){result.sourceRequests++;const r=await context.request.get(url,{timeout:18000,maxRedirects:0});const out={label,httpStatus:r.status(),retryAfter:r.headers()['retry-after']||null};result.tests.push(out);if([401,403,406,429].includes(r.status())||out.retryAfter){out.controlRespected=true;throw Error('SOURCE_CONTROL');}const text=await r.text();if(text.length>1500000)throw Error('SIZE');const j=JSON.parse(text);if(j.error){out.error={code:j.error.code,message:j.error.message};if([401,403,498,499].includes(j.error.code)){out.controlRespected=true;throw Error('SOURCE_CONTROL');}}return {j,out};}
+           const {j:meta,out:mo}=await read('published-permit-layer-metadata',layer+'?f=pjson');mo.name=meta.name;mo.description=meta.description?.slice(0,1500);mo.capabilities=meta.capabilities;mo.fields=meta.fields?.map(x=>({name:x.name,alias:x.alias,type:x.type}));mo.supportsStatistics=meta.supportsStatistics;mo.advancedQueryCapabilities=meta.advancedQueryCapabilities;
+           const oid=meta.fields?.find(x=>x.type==='esriFieldTypeOID')?.name;
+           const dates=meta.fields?.filter(x=>x.type==='esriFieldTypeDate'&&/appl|enter|issu|modif|creat/i.test(x.name+' '+x.alias)&&!/condition|person|birth/i.test(x.alias+' '+x.name))||[];
+           if(oid&&dates.length&&(meta.supportsStatistics||meta.advancedQueryCapabilities?.supportsStatistics)){
+            const stats=[{statisticType:'count',onStatisticField:oid,outStatisticFieldName:'record_count'},...dates.map((x,i)=>({statisticType:'max',onStatisticField:x.name,outStatisticFieldName:'max_date_'+i}))];
+            const q=new URLSearchParams({f:'json',where:'1=1',outStatistics:JSON.stringify(stats),returnGeometry:'false'});const {j:data,out:so}=await read('aggregate-count-and-latest-dates',layer+'/query?'+q);const a=data.features?.[0]?.attributes||{};so.recordCount=a.record_count;so.latestDates=dates.map((x,i)=>({field:x.name,alias:x.alias,value:Number.isFinite(a['max_date_'+i])?new Date(a['max_date_'+i]).toISOString():null}));so.error=data.error;
            }
-          }catch(e){const m=String(e?.message||'');result.failure=/USA_NOT_VERIFIED/.test(m)?'USA-not-verified':/timeout|Timeout/.test(m)?'timeout':'runtime-error';}
+          }catch(e){const m=String(e?.message||'');result.failure=/USA_NOT_VERIFIED/.test(m)?'USA-not-verified':/SOURCE_CONTROL/.test(m)?'source-control-respected':/timeout|Timeout/.test(m)?'timeout':'runtime-error';}
           finally{clearTimeout(timer);if(browser){await browser.close().catch(()=>{});result.browserClosed=!browser.isConnected();}console.log(JSON.stringify(result));if(!result.countryVerified||!result.browserClosed)process.exitCode=1;}
           NODE
