@@ -1,4 +1,4 @@
-name: Carlsbad free direct connection comparison
+name: Carlsbad free direct permit inventory
 on:
   workflow_dispatch:
 permissions: {}
@@ -8,22 +8,26 @@ concurrency:
 jobs:
   direct-acceptance:
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: 4
     steps:
-      - name: Verify USA and read public search metadata without a browser
+      - name: Read four complete native windows without a browser
         run: |
           node --input-type=module <<'NODE'
-          const result={checkedAt:new Date().toISOString(),browserUsed:false,sourceRequests:0,rawRecordsLogged:false};
+          const result={checkedAt:new Date().toISOString(),browserUsed:false,sourceRequests:0,rawRecordsLogged:false,windows:[]};const seen=new Set(),end=Date.now()+150000;
           try{
-            const check=await fetch('https://ipwho.is/',{signal:AbortSignal.timeout(12000)});const n=await check.json();
-            result.network={status:check.status,success:n.success===true,country:n.country_code||null,independentOfCloudflare:Number(n.connection?.asn)!==13335&&!/cloudflare/i.test(String(n.connection?.org||''))};
-            if(check.status!==200||n.success!==true||n.country_code!=='US'||!result.network.independentOfCloudflare)throw Error('USA_NOT_VERIFIED');
-            const url='https://eg.carlsbadca.gov/EnerGov_Prod/selfservice/api/energov/search/criteria';
-            result.sourceRequests++;
-            const response=await fetch(url,{redirect:'manual',headers:{tenantId:'1',tenantName:'CarlsbadCAProd','Tyler-TenantUrl':'CarlsbadCAProd',Accept:'application/json'},signal:AbortSignal.timeout(25000)});
-            result.status=response.status;result.contentType=response.headers.get('content-type');result.retryAfter=response.headers.get('retry-after');
-            if([401,403,406,429].includes(response.status)||result.retryAfter){result.controlRespected=true;await response.body?.cancel();}
-            else {const text=await response.text();result.bytes=text.length;if(text.length>2000000)throw Error('SIZE_LIMIT');let j;try{j=JSON.parse(text)}catch{};result.accepted=response.status===200&&j?.Success===true;result.permitCriteriaPresent=!!j?.Result?.PermitCriteria;result.refusal=/you have been blocked|access denied|verify you are human/i.test(text);}
-          }catch(e){result.failure=['USA_NOT_VERIFIED','SIZE_LIMIT'].includes(e.message)?e.message:e.name;}
+          const c=await fetch('https://ipwho.is/',{signal:AbortSignal.timeout(12000)}),n=await c.json();result.network={status:c.status,country:n.country_code,independentOfCloudflare:Number(n.connection?.asn)!==13335&&!/cloudflare/i.test(String(n.connection?.org||''))};if(c.status!==200||!n.success||n.country_code!=='US'||!result.network.independentOfCloudflare)throw Error('USA_NOT_VERIFIED');
+          const base='https://eg.carlsbadca.gov/EnerGov_Prod/selfservice/api/energov',headers={tenantId:'1',tenantName:'CarlsbadCAProd','Tyler-TenantUrl':'CarlsbadCAProd',Accept:'application/json'};
+          const read=async(path,body)=>{if(result.sourceRequests>=45||Date.now()>end)throw Error('DIAGNOSTIC_LIMIT');result.sourceRequests++;const r=await fetch(base+path,{method:body?'POST':'GET',headers:{...headers,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),redirect:'manual',signal:AbortSignal.timeout(25000)});if(r.status!==200||r.headers.get('retry-after')){result.refusal={status:r.status,retryAfter:r.headers.get('retry-after')};await r.body?.cancel();throw Error('SOURCE_DEFERRED');}const text=await r.text();if(text.length>3000000)throw Error('SIZE_LIMIT');const j=JSON.parse(text);if(j.Success!==true||!j.Result)throw Error('SOURCE_CONTRACT');return j.Result;};
+          const defaults=await read('/search/criteria');
+          for(const [category,type]of [['residential-solar','1dce8bbf-e009-4145-abec-7b591539a1fe_6637f162-f1d7-4035-f280-7f8ef3f45d26'],['solar-app','1dce8bbf-e009-4145-abec-7b591539a1fe_effb0b2c-6992-efea-d8e2-bf51d2ecc3f2']])for(const axis of ['ApplyDate','IssueDate']){
+          const w={category,axis,from:'2026-07-17',through:'2026-10-15',expected:null,rows:0,pages:0,complete:false,latestApplied:null,latestIssued:null,statusCounts:{}};result.windows.push(w);const ids=new Set();
+          for(let page=1;page<=10;page++){
+          const criteria={...Object.fromEntries(Object.keys(defaults.PermitCriteria||{}).map(k=>[k,null])),PermitNumber:null,PermitTypeId:type,PermitStatusId:'none',SearchMainAddress:false,EnableDescriptionSearch:false,PageNumber:page,PageSize:100,SortBy:'PermitNumber.keyword',SortAscending:true,[axis+'From']:'2026-07-17T00:00:00',[axis+'To']:'2026-10-15T23:59:59.999'};
+          const q={...structuredClone(defaults),Keyword:'',ExactMatch:false,SearchModule:2,FilterModule:0,SearchMainAddress:false,ExcludeCases:null,PageNumber:page,PageSize:100,SortBy:'PermitNumber.keyword',SortAscending:true,PermitCriteria:criteria},d=await read('/search/search',q);if(!Number.isSafeInteger(d.TotalFound)||!Array.isArray(d.EntityResults))throw Error('PAGE_CONTRACT');if(w.expected===null)w.expected=d.TotalFound;else if(w.expected!==d.TotalFound)throw Error('COUNT_CHANGED');w.pages++;
+          for(const r of d.EntityResults){if(!r.CaseId||ids.has(r.CaseId))throw Error('DUPLICATE_ID');if((r.CaseTypeId+'_'+r.CaseWorkclassId)!==type)throw Error('WRONG_CATEGORY');const date=String(r[axis]||'').slice(0,10);if(date<'2026-07-17'||date>'2026-10-15')throw Error('WRONG_DATE');ids.add(r.CaseId);seen.add(r.CaseId);w.rows++;w.statusCounts[r.CaseStatus]=(w.statusCounts[r.CaseStatus]||0)+1;for(const [field,last]of [['ApplyDate','latestApplied'],['IssueDate','latestIssued']]){const v=String(r[field]||'').slice(0,10);if(v)w[last]=!w[last]||v>w[last]?v:w[last];}}
+          if(w.rows===w.expected){w.complete=true;break;}if(d.EntityResults.length!==100)throw Error('TRUNCATED_PAGE');
+          }if(!w.complete)throw Error('DIAGNOSTIC_PAGE_LIMIT');
+          }result.distinctPermits=seen.size;result.accepted=result.windows.length===4&&result.windows.every(w=>w.complete);
+          }catch(e){result.failure=['USA_NOT_VERIFIED','DIAGNOSTIC_LIMIT','SOURCE_DEFERRED','SIZE_LIMIT','SOURCE_CONTRACT','PAGE_CONTRACT','COUNT_CHANGED','DUPLICATE_ID','WRONG_CATEGORY','WRONG_DATE','TRUNCATED_PAGE','DIAGNOSTIC_PAGE_LIMIT'].includes(e.message)?e.message:e.name;}
           console.log(JSON.stringify(result));
           NODE
