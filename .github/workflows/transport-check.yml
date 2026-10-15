@@ -1,111 +1,89 @@
-name: Vista new report publication assessment
-
+name: Vista separate public inspection publication
 on:
   workflow_dispatch:
-
 permissions: {}
-
 concurrency:
   group: public-source-transport-acceptance
   cancel-in-progress: false
-
 jobs:
   browser-acceptance:
     runs-on: ubuntu-24.04
     timeout-minutes: 6
     steps:
-      - name: Install official browser test dependency
-        run: |
-          npm install --ignore-scripts --no-package-lock playwright@1.64.1
-          npx playwright install --with-deps --no-shell chromium
-      - name: Confirm installed official Chrome
-        run: |
-          command -v google-chrome
-          google-chrome --version
-      - name: Verify U.S. network and test published public entry
+      - name: Install official browser dependency
+        run: npm install --ignore-scripts --no-package-lock playwright@1.64.1
+      - name: Assess only public source metadata and aggregates
         run: |
           node --input-type=module <<'NODE'
           import { chromium } from 'playwright';
           import fs from 'node:fs';
           import os from 'node:os';
           import path from 'node:path';
-          import {createHash} from 'node:crypto';
           import {spawnSync} from 'node:child_process';
-          const report = {
-            checkedAt: new Date().toISOString(),
-            purpose: 'Public-source software transport acceptance only',
-            maximumBrowserSeconds: 70,
-            maximumSourceRequests: 20,
-            sourceRequests: 0,
-            sourceNavigationAttempts: 0,
-            countryVerified: false,
-            nonCloudflareNetworkVerified: false,
-            snapshotsSaved: false,
-            permitDataLogged: false,
-            sourceStatus: null,
-            sourcePageKind: 'not-visited',
-            browserClosed: false
-          };
-          let browser, context, deadline;
-          let stage = 'browser-start';
-          try {
-            browser = await chromium.launch({ channel: 'chrome', headless: true, chromiumSandbox: true });
-            deadline = setTimeout(() => void browser.close().catch(() => {}), 70000);
-            context = await browser.newContext({ acceptDownloads: false });
-            const page = await context.newPage();
-            page.setDefaultNavigationTimeout(30000);
-            stage='independent-network-country-control';
-            const networkResponse=await page.goto('https://ipwho.is/',{waitUntil:'domcontentloaded'});
-            report.networkControlHttp=networkResponse?.status();
-            const network=await networkResponse.json();
-            report.networkControlCountry=network.country_code;
-            const asn=Number(network.connection?.asn);
-            const organization=String(network.connection?.org||network.connection?.isp||'');
-            if(networkResponse?.status()!==200||network.success!==true||network.country_code!=='US')throw Error('USA_NETWORK_NOT_VERIFIED');
-            if(!Number.isFinite(asn)||asn===13335||/cloudflare/i.test(organization))throw Error('INDEPENDENT_NETWORK_NOT_VERIFIED');
-            stage='second-independent-country-control';
-            const countryResponse=await page.goto('https://api.country.is/',{waitUntil:'domcontentloaded'});
-            report.secondCountryControlHttp=countryResponse?.status();
-            const geo=await countryResponse.json();report.secondCountryControlCountry=geo.country;
-            if(countryResponse?.status()!==200||geo.country!=='US')throw Error('USA_NOT_VERIFIED');
-            report.countryVerified=true;report.nonCloudflareNetworkVerified=true;
-            report.networkKind=/microsoft|azure/i.test(organization)?'Microsoft/Azure':'independent-provider';
-            console.log(JSON.stringify({stage:'two-independent-USA-controls-accepted',sourceRequests:0}));
-            stage='new-publisher-version-assessment';
-            const parser="import json,sys,zipfile,xml.etree.ElementTree as E,re\nfrom datetime import datetime,timedelta\nwith zipfile.ZipFile(sys.argv[1]) as z:\n if sum(i.file_size for i in z.infolist())>20000000:raise ValueError('Workbook exceeds assessment bound')\n ns={'m':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}\n strings=[]\n if 'xl/sharedStrings.xml' in z.namelist():\n  strings=[''.join(e.itertext()) for e in E.fromstring(z.read('xl/sharedStrings.xml')).findall('m:si',ns)]\n sheet=E.fromstring(z.read('xl/worksheets/sheet1.xml'))\n rows=[]\n for row in sheet.findall('.//m:sheetData/m:row',ns):\n  out={}\n  for c in row.findall('m:c',ns):\n   address=c.attrib.get('r','');col=re.sub('[0-9]','',address);v=c.find('m:v',ns);text=v.text if v is not None else ''\n   if c.attrib.get('t')=='s':text=strings[int(text)] if text else ''\n   elif c.attrib.get('t')=='inlineStr':text=''.join(c.find('m:is',ns).itertext())\n   out[col]=text or ''\n  rows.append(out)\n header=next((i,x) for i,x in enumerate(rows) if 'PERMIT NUMBER' in x.values())\n cols={v:k for k,v in header[1].items()}\n required=['PERMIT NUMBER','PERMIT TYPE','DATE ENTERED','DATE ISSUED','PERMIT DESCRIPTION']\n if not all(k in cols for k in required):raise ValueError('Source schema changed')\n def date(v):\n  if not v:return None\n  try:\n   n=float(v)\n   if 20000<n<100000:return (datetime(1899,12,30)+timedelta(days=n)).date().isoformat()\n  except ValueError:pass\n  for f in ['%Y-%m-%d','%m/%d/%Y','%m/%d/%Y %H:%M:%S','%m/%d/%Y %I:%M:%S %p']:\n   try:return datetime.strptime(v,f).date().isoformat()\n   except ValueError:pass\n  raise ValueError('Unparsed source date')\n allrows=[x for x in rows[header[0]+1:] if x.get(cols['PERMIT NUMBER'])]\n solar=[x for x in allrows if re.search(r'\\b(?:solar|photovoltaic|pv)\\b',x.get(cols['PERMIT TYPE'],'')+' '+x.get(cols['PERMIT DESCRIPTION'],''),re.I)]\n def maximum(rr,key):return max((date(x.get(cols[key],'')) for x in rr if x.get(cols[key])),default=None)\n metadata=[v for x in rows[:header[0]] for v in x.values() if 'Report Generated' in v]\n print(json.dumps({'rows':len(allrows),'distinctPermits':len({x[cols['PERMIT NUMBER']] for x in allrows}),'solarRows':len(solar),'reportPrintedDates':metadata,'latestApplication':maximum(allrows,'DATE ENTERED'),'latestIssuance':maximum(allrows,'DATE ISSUED'),'latestSolarApplication':maximum(solar,'DATE ENTERED'),'latestSolarIssuance':maximum(solar,'DATE ISSUED'),'solarApplicationsAfterSeptember21':sum(bool(x.get(cols['DATE ENTERED'])) and date(x[cols['DATE ENTERED']])>'2026-09-21' for x in solar),'solarIssuancesAfterSeptember21':sum(bool(x.get(cols['DATE ISSUED'])) and date(x[cols['DATE ISSUED']])>'2026-09-21' for x in solar)}))\n";
-            const priorHashes={"applied":"f9aeeb88e25cef75f628eb2ad49205d05eaf02ef7fe51b7b8fa81d2c9493e6c9","issued":"8d5723804af58fe7bdba40e1a381384ca7d18b52b0bffd52fe218325635cbcaf"};
-            const reports=[{kind:'applied',url:'https://gis.vista.gov/files/Vista_Bld_Applied_Permits_YTD.xlsx'},{kind:'issued',url:'https://gis.vista.gov/files/Vista_Bld_Issued_Permits_YTD.xlsx'}];
-            report.publisherVersions=[];
-            for(const item of reports){
-              report.sourceRequests++;const head=await context.request.head(item.url,{timeout:20000,maxRedirects:0});
-              const status=head.status(),headers=head.headers();const lm=headers['last-modified'];
-              const result={kind:item.kind,http:status,lastModified:lm||null,etag:headers.etag||null,contentLength:headers['content-length']||null};report.publisherVersions.push(result);
-              if([401,403,406,429].includes(status)||headers['retry-after']){result.sourceControl=true;throw Error('SOURCE_REFUSAL');}
-              if(status!==200){result.assessment='metadata-unavailable';continue;}
-              if(!lm||!Number.isFinite(Date.parse(lm))||Date.parse(lm)<=Date.parse('2026-10-14T19:40:00Z')){result.assessment='no-new-version-established';continue;}
-              report.sourceRequests++;const data=await context.request.get(item.url,{timeout:20000,maxRedirects:0});
-              if(data.status()!==200||data.headers()['retry-after'])throw Error('SOURCE_DOWNLOAD_NOT_ACCEPTED');
-              const bytes=await data.body();if(bytes.length>3000000)throw Error('SOURCE_SIZE_BOUND');
-              const digest=createHash('sha256').update(bytes).digest('hex');result.sha256=digest;result.bytes=bytes.length;
-              if(digest===priorHashes[item.kind]){result.assessment='byte-identical-to-reviewed-copy';continue;}
-              const file=path.join(os.tmpdir(),'vista-public-report-'+item.kind+'-'+process.pid+'.xlsx');
-              try{fs.writeFileSync(file,bytes,{mode:0o600});const parsed=spawnSync('python3',['-c',parser,file],{encoding:'utf8',timeout:10000,maxBuffer:100000});if(parsed.status!==0){result.assessment='source-schema-or-date-rejected';continue;}result.aggregates=JSON.parse(parsed.stdout);result.assessment='changed-version-assessed';}finally{try{fs.unlinkSync(file)}catch{}}
-            }
-            report.sourceStatus=200;report.sourcePageKind='publisher-version-assessment-complete';
-          } catch (error) {
-            report.failedStage = stage;
-            report.errorKind = error?.name || 'Error';
-            const detail = String(error?.message || '');
-            report.errorCategory = /sandbox|SUID|namespace/i.test(detail) ? 'sandbox-startup-failure' : /Executable doesn.t exist/i.test(detail) ? 'browser-executable-missing' : /USA_NOT_VERIFIED/.test(detail) ? 'country-not-US' : /USA_NETWORK_NOT_VERIFIED/.test(detail) ? 'network-control-not-US' : /INDEPENDENT_NETWORK_NOT_VERIFIED/.test(detail) ? 'network-not-independent' : /net::ERR_CERT|certificate/i.test(detail) ? 'certificate-validation-failed' : /Timeout|timeout/.test(detail) ? 'navigation-timeout' : 'other-runtime-error';
-            report.sourcePageKind = report.sourcePageKind === 'not-visited' && report.sourceNavigationAttempts ? 'navigation-failed' : report.sourcePageKind;
-          } finally {
-            clearTimeout(deadline);
-            if (browser) {
-              await browser.close().catch(() => {});
-              report.browserClosed = !browser.isConnected();
-            }
-            console.log(JSON.stringify(report));
-            if (!report.countryVerified || !report.nonCloudflareNetworkVerified || !report.browserClosed) process.exitCode = 1;
-          }
-          
+          const result={purpose:'Assess separately published daily inspection source; no records logged',checkedAt:new Date().toISOString(),maximumBrowserSeconds:70,maximumSourceRequests:1,sourceRequests:0,browserClosed:false,rawRecordsLogged:false};
+          let browser,timer;
+          try{
+           browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});
+           timer=setTimeout(()=>void browser.close().catch(()=>{}),70000);
+           const context=await browser.newContext({acceptDownloads:false});const page=await context.newPage();
+           const control=await page.goto('https://ipwho.is/',{waitUntil:'domcontentloaded',timeout:20000});
+           const network=await control.json();
+           if(control.status()!==200||network.success!==true||network.country_code!=='US'||Number(network.connection?.asn)===13335||/cloudflare/i.test(String(network.connection?.org||'')))throw Error('USA_NETWORK_NOT_VERIFIED');
+           result.countryVerified='US';result.independentOfCloudflare=true;
+           result.sourceRequests++;
+           const response=await context.request.get('https://gis.vista.gov/files/Vista_Bld_Permit_Inspection_Results.xlsx',{timeout:22000,maxRedirects:0});
+           result.httpStatus=response.status();result.lastModified=response.headers()['last-modified']||null;
+           if([401,403,406,429].includes(response.status())||response.headers()['retry-after'])throw Error('SOURCE_CONTROL');
+           if(response.status()!==200)throw Error('SOURCE_HTTP');
+           const bytes=await response.body();result.bytes=bytes.length;if(bytes.length>3000000)throw Error('SIZE_BOUND');
+           const filename=path.join(os.tmpdir(),'vista-public-inspections-'+process.pid+'.xlsx');
+           const parser=String.raw`import json,sys,zipfile,xml.etree.ElementTree as E,re
+          from datetime import datetime,timedelta
+          from urllib.parse import urlparse
+          n={'m':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+          with zipfile.ZipFile(sys.argv[1]) as z:
+           if sum(x.file_size for x in z.infolist())>20000000:raise ValueError('size')
+           ss=[''.join(x.itertext()) for x in E.fromstring(z.read('xl/sharedStrings.xml')).findall('m:si',n)] if 'xl/sharedStrings.xml' in z.namelist() else []
+           rows=[]
+           for row in E.fromstring(z.read('xl/worksheets/sheet1.xml')).findall('.//m:sheetData/m:row',n):
+            cells={}
+            for c in row.findall('m:c',n):
+             col=re.sub('[0-9]','',c.attrib.get('r',''));v=c.find('m:v',n);v=v.text if v is not None else ''
+             if c.attrib.get('t')=='s':v=ss[int(v)] if v else ''
+             elif c.attrib.get('t')=='inlineStr':v=''.join(c.find('m:is',n).itertext())
+             cells[col]=v or ''
+            rows.append(cells)
+           head=next(((i,r) for i,r in enumerate(rows[:12]) if any('PERMIT' in v.upper() for v in r.values()) and sum(bool(re.search('DATE|RESULT|INSPECTION|NUMBER|ADDRESS|DESCRIPTION|STATUS',v,re.I)) for v in r.values())>=2),None)
+           out={'rows':len(rows),'headerLocated':head is not None,'externalHyperlinkOrigins':[]}
+           if head:
+            out['headers']=list(head[1].values());records=rows[head[0]+1:];out['dataRows']=len(records)
+            out['solarTextRows']=sum(bool(re.search(r'\b(solar|pv|photovoltaic)\b',' '.join(r.values()),re.I)) for r in records)
+            out['dateColumns']={}
+            for col,name in head[1].items():
+             if 'DATE' not in name.upper():continue
+             found=[]
+             for r in records:
+              value=r.get(col,'')
+              if not value:continue
+              try:
+               num=float(value)
+               if 20000<num<100000:found.append((datetime(1899,12,30)+timedelta(days=num)).date().isoformat());continue
+              except ValueError:pass
+              for fmt in ['%m/%d/%Y','%Y-%m-%d','%m/%d/%Y %H:%M:%S','%m/%d/%Y %I:%M:%S %p']:
+               try:found.append(datetime.strptime(value,fmt).date().isoformat());break
+               except ValueError:pass
+             out['dateColumns'][name]={'parsedDates':len(found),'latest':max(found) if found else None}
+           out['reportPrintedDates']=[v for r in rows[:head[0] if head else 2] for v in r.values() if 'Report Generated' in v]
+           origins=set()
+           for f in z.namelist():
+            if f.endswith('.rels'):
+             for rel in E.fromstring(z.read(f)):
+              if rel.attrib.get('TargetMode')=='External':
+               p=urlparse(rel.attrib.get('Target',''))
+               if p.scheme in ['http','https']:origins.add(p.scheme+'://'+p.netloc)
+           out['externalHyperlinkOrigins']=sorted(origins)
+           print(json.dumps(out))`;
+           try{fs.writeFileSync(filename,bytes,{mode:0o600});const parsed=spawnSync('python3',['-c',parser,filename],{encoding:'utf8',timeout:10000,maxBuffer:50000});if(parsed.status!==0)throw Error('WORKBOOK_SCHEMA');result.assessment=JSON.parse(parsed.stdout);}finally{try{fs.unlinkSync(filename)}catch{}}
+          }catch(error){const message=String(error?.message||'');result.failure=/USA_NETWORK_NOT_VERIFIED/.test(message)?'country-or-independent-network-not-verified':/SOURCE_CONTROL/.test(message)?'source-control-respected':/Timeout|timeout/.test(message)?'timeout':/WORKBOOK_SCHEMA/.test(message)?'workbook-schema-rejected':'source-or-runtime-error';}
+          finally{clearTimeout(timer);if(browser){await browser.close().catch(()=>{});result.browserClosed=!browser.isConnected();}console.log(JSON.stringify(result));if(!result.browserClosed||!result.assessment)process.exitCode=1;}
           NODE
