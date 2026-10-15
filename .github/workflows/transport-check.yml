@@ -1,4 +1,4 @@
-name: Vista published GIS query controls
+name: Vista new report publication assessment
 
 on:
   workflow_dispatch:
@@ -26,6 +26,11 @@ jobs:
         run: |
           node --input-type=module <<'NODE'
           import { chromium } from 'playwright';
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import path from 'node:path';
+          import {createHash} from 'node:crypto';
+          import {spawnSync} from 'node:child_process';
           const report = {
             checkedAt: new Date().toISOString(),
             purpose: 'Public-source software transport acceptance only',
@@ -66,15 +71,27 @@ jobs:
             report.countryVerified=true;report.nonCloudflareNetworkVerified=true;
             report.networkKind=/microsoft|azure/i.test(organization)?'Microsoft/Azure':'independent-provider';
             console.log(JSON.stringify({stage:'two-independent-USA-controls-accepted',sourceRequests:0}));
-            stage='public-gis-query-controls';
-            context.on('request',()=>{if(++report.sourceRequests>report.maximumSourceRequests)void context.close().catch(()=>{});});
-            const base='https://app06.cityworksonline.com/CLIENT_VistaCA-Office/gis/16/4700/rest/services/cw/FeatureServer';
-            const read=async(url)=>{report.sourceNavigationAttempts++;const r=await page.goto(url,{waitUntil:'domcontentloaded'});if([401,403,406,429].includes(r?.status())||r?.headers()['retry-after'])throw Error('SOURCE_REFUSAL');if(r?.status()!==200)throw Error('SOURCE_HTTP');const d=await r.json();if(d.error){report.sourceError={code:d.error.code,message:String(d.error.message||'').slice(0,150)};throw Error('SOURCE_ERROR')};return d;};
-            const countQuery={f:'json',where:'1=1',returnCountOnly:'true'};
-            const inspection=await read(base+'/3/query?'+new URLSearchParams(countQuery));report.publishedInspectionControl={keys:Object.keys(inspection),count:inspection.count};
-            const geometry={xmin:-117.39984078,ymin:33.05725059,xmax:-116.99399836,ymax:33.29999889,spatialReference:{wkid:4326}};
-            const spatial=await read(base+'/5/query?'+new URLSearchParams({...countQuery,geometry:JSON.stringify(geometry),geometryType:'esriGeometryEnvelope',inSR:'4326',spatialRel:'esriSpatialRelIntersects'}));report.permitSpatialControl={keys:Object.keys(spatial),count:spatial.count,scope:'adopted North County envelope; diagnostic only, not City qualification'};
-            report.sourceStatus=200;report.sourcePageKind='public-gis-query-controls-complete';
+            stage='new-publisher-version-assessment';
+            const parser="import json,sys,zipfile,xml.etree.ElementTree as E,re\nfrom datetime import datetime,timedelta\nwith zipfile.ZipFile(sys.argv[1]) as z:\n if sum(i.file_size for i in z.infolist())>20000000:raise ValueError('Workbook exceeds assessment bound')\n ns={'m':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}\n strings=[]\n if 'xl/sharedStrings.xml' in z.namelist():\n  strings=[''.join(e.itertext()) for e in E.fromstring(z.read('xl/sharedStrings.xml')).findall('m:si',ns)]\n sheet=E.fromstring(z.read('xl/worksheets/sheet1.xml'))\n rows=[]\n for row in sheet.findall('.//m:sheetData/m:row',ns):\n  out={}\n  for c in row.findall('m:c',ns):\n   address=c.attrib.get('r','');col=re.sub('[0-9]','',address);v=c.find('m:v',ns);text=v.text if v is not None else ''\n   if c.attrib.get('t')=='s':text=strings[int(text)] if text else ''\n   elif c.attrib.get('t')=='inlineStr':text=''.join(c.find('m:is',ns).itertext())\n   out[col]=text or ''\n  rows.append(out)\n header=next((i,x) for i,x in enumerate(rows) if 'PERMIT NUMBER' in x.values())\n cols={v:k for k,v in header[1].items()}\n required=['PERMIT NUMBER','PERMIT TYPE','DATE ENTERED','DATE ISSUED','PERMIT DESCRIPTION']\n if not all(k in cols for k in required):raise ValueError('Source schema changed')\n def date(v):\n  if not v:return None\n  try:\n   n=float(v)\n   if 20000<n<100000:return (datetime(1899,12,30)+timedelta(days=n)).date().isoformat()\n  except ValueError:pass\n  for f in ['%Y-%m-%d','%m/%d/%Y','%m/%d/%Y %H:%M:%S','%m/%d/%Y %I:%M:%S %p']:\n   try:return datetime.strptime(v,f).date().isoformat()\n   except ValueError:pass\n  raise ValueError('Unparsed source date')\n allrows=[x for x in rows[header[0]+1:] if x.get(cols['PERMIT NUMBER'])]\n solar=[x for x in allrows if re.search(r'\\b(?:solar|photovoltaic|pv)\\b',x.get(cols['PERMIT TYPE'],'')+' '+x.get(cols['PERMIT DESCRIPTION'],''),re.I)]\n def maximum(rr,key):return max((date(x.get(cols[key],'')) for x in rr if x.get(cols[key])),default=None)\n metadata=[v for x in rows[:header[0]] for v in x.values() if 'Report Generated' in v]\n print(json.dumps({'rows':len(allrows),'distinctPermits':len({x[cols['PERMIT NUMBER']] for x in allrows}),'solarRows':len(solar),'reportPrintedDates':metadata,'latestApplication':maximum(allrows,'DATE ENTERED'),'latestIssuance':maximum(allrows,'DATE ISSUED'),'latestSolarApplication':maximum(solar,'DATE ENTERED'),'latestSolarIssuance':maximum(solar,'DATE ISSUED'),'solarApplicationsAfterSeptember21':sum(bool(x.get(cols['DATE ENTERED'])) and date(x[cols['DATE ENTERED']])>'2026-09-21' for x in solar),'solarIssuancesAfterSeptember21':sum(bool(x.get(cols['DATE ISSUED'])) and date(x[cols['DATE ISSUED']])>'2026-09-21' for x in solar)}))\n";
+            const priorHashes={"applied":"f9aeeb88e25cef75f628eb2ad49205d05eaf02ef7fe51b7b8fa81d2c9493e6c9","issued":"8d5723804af58fe7bdba40e1a381384ca7d18b52b0bffd52fe218325635cbcaf"};
+            const reports=[{kind:'applied',url:'https://gis.vista.gov/files/Vista_Bld_Applied_Permits_YTD.xlsx'},{kind:'issued',url:'https://gis.vista.gov/files/Vista_Bld_Issued_Permits_YTD.xlsx'}];
+            report.publisherVersions=[];
+            for(const item of reports){
+              report.sourceRequests++;const head=await context.request.head(item.url,{timeout:20000,maxRedirects:0});
+              const status=head.status(),headers=head.headers();const lm=headers['last-modified'];
+              const result={kind:item.kind,http:status,lastModified:lm||null,etag:headers.etag||null,contentLength:headers['content-length']||null};report.publisherVersions.push(result);
+              if([401,403,406,429].includes(status)||headers['retry-after']){result.sourceControl=true;throw Error('SOURCE_REFUSAL');}
+              if(status!==200){result.assessment='metadata-unavailable';continue;}
+              if(!lm||!Number.isFinite(Date.parse(lm))||Date.parse(lm)<=Date.parse('2026-10-14T19:40:00Z')){result.assessment='no-new-version-established';continue;}
+              report.sourceRequests++;const data=await context.request.get(item.url,{timeout:20000,maxRedirects:0});
+              if(data.status()!==200||data.headers()['retry-after'])throw Error('SOURCE_DOWNLOAD_NOT_ACCEPTED');
+              const bytes=await data.body();if(bytes.length>3000000)throw Error('SOURCE_SIZE_BOUND');
+              const digest=createHash('sha256').update(bytes).digest('hex');result.sha256=digest;result.bytes=bytes.length;
+              if(digest===priorHashes[item.kind]){result.assessment='byte-identical-to-reviewed-copy';continue;}
+              const file=path.join(os.tmpdir(),'vista-public-report-'+item.kind+'-'+process.pid+'.xlsx');
+              try{fs.writeFileSync(file,bytes,{mode:0o600});const parsed=spawnSync('python3',['-c',parser,file],{encoding:'utf8',timeout:10000,maxBuffer:100000});if(parsed.status!==0){result.assessment='source-schema-or-date-rejected';continue;}result.aggregates=JSON.parse(parsed.stdout);result.assessment='changed-version-assessed';}finally{try{fs.unlinkSync(file)}catch{}}
+            }
+            report.sourceStatus=200;report.sourcePageKind='publisher-version-assessment-complete';
           } catch (error) {
             report.failedStage = stage;
             report.errorKind = error?.name || 'Error';
