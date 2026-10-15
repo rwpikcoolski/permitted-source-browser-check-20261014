@@ -1,4 +1,4 @@
-name: Vista new hosted portal rendered-login acceptance
+name: Vista published hosted GIS metadata acceptance
 
 on:
   workflow_dispatch:
@@ -30,7 +30,7 @@ jobs:
             checkedAt: new Date().toISOString(),
             purpose: 'Public-source software transport acceptance only',
             maximumBrowserSeconds: 70,
-            maximumSourceRequests: 256,
+            maximumSourceRequests: 20,
             sourceRequests: 0,
             sourceNavigationAttempts: 0,
             countryVerified: false,
@@ -65,46 +65,21 @@ jobs:
             report.nonCloudflareNetworkVerified = true;
             report.networkKind = /microsoft|azure/i.test(organization) ? 'Microsoft/Azure' : 'independent-provider';
             console.log(JSON.stringify({ stage: 'ordinary-browser-USA-outside-Cloudflare-verified', sourceRequests: 0 }));
-            stage = 'published-source-navigation';
-            context.on('request', () => {
-              report.sourceRequests++;
-              if (report.sourceRequests > report.maximumSourceRequests) {
-                report.requestLimitReached = true;
-                void context.close().catch(() => {});
-              }
-            });
-            report.sourceNavigationAttempts = 1;
-            const response = await page.goto('https://app06.cityworksonline.com/CLIENT_VistaCA-public/login', { waitUntil: 'domcontentloaded' });
-            report.sourceStatus = response?.status() ?? null;const destination=new URL(page.url());report.sourceDestination={origin:destination.origin,path:destination.pathname,hasQuery:Boolean(destination.search)};report.redirectCount=0;let prior=response?.request()?.redirectedFrom();while(prior){report.redirectCount++;prior=prior.redirectedFrom();}
-            report.sourceRetryAfter = Boolean(response?.headers()['retry-after']);
-            if ([401, 403, 406, 429].includes(report.sourceStatus) || report.sourceRetryAfter) {
-              report.sourcePageKind = 'publisher-refusal';
-            } else if (report.sourceStatus === 522) {
-              report.sourcePageKind = 'origin-connection-timeout';
-            } else if (report.sourceStatus >= 200 && report.sourceStatus < 300) {
-              stage='published-login-render';await page.locator('input[type=password]').waitFor({state:'visible',timeout:15000});report.loginRendered=true;
-              const view = await page.evaluate(() => {
-                const text = document.body?.innerText || '';
-                const links = [...document.querySelectorAll('a[href]')].flatMap(a => {
-                  const label = String(a.innerText || a.textContent || '').trim().replace(/\s+/g,' ');
-                  const u = new URL(a.href, location.href);
-                  const cityHost = /(^|\.)vista\.gov$|(^|\.)cityofvista\.com$/i.test(u.hostname);
-                  const cityLabel = /^(?:City of )?Vista(?:\s*,?\s*(?:CA|California))?$/i.test(label);
-                  if (!['http:','https:'].includes(u.protocol) || (!cityHost && !cityLabel && !/participating|available|find your|map|jurisdiction|portal|permit|apply|search|cityworks|solarapp/i.test(label+' '+u.pathname)) || /chula vista/i.test(label)) return [];
-                  if (/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(u.href)) return [];
-                  return [{label:label.length<100?label:'Public navigation link',url:u.origin+u.pathname,hasQuery:Boolean(u.search)}];
-                });
-                const vistaNodes=[...document.querySelectorAll('a,span,h2,h3,h4,p,div')].filter(e=>/^(?:City of )?Vista(?:\s*,?\s*(?:CA|California))?$/i.test((e.innerText||'').trim())).slice(0,5);const vistaRows=vistaNodes.map(e=>{const row=e.closest('.w-dyn-item')||e.parentElement;return{nodeTag:e.tagName,collectionRow:Boolean(e.closest('.w-dyn-item')),publishedLinks:[...row.querySelectorAll('a[href]')].flatMap(a=>{const u=new URL(a.href,location.href);return ['https:','http:'].includes(u.protocol)&&!/caseid|recordid|permitid|applicationid|token|secret|key=/i.test(u.href)?[{label:(a.innerText||'').trim().slice(0,100),url:u.origin+u.pathname,hasQuery:Boolean(u.search)}]:[]})};});const frames=[...document.querySelectorAll('iframe')].map(f=>{const src=f.getAttribute('src')||'';let origin=null,path=null;try{const u=new URL(src,location.href);if(['http:','https:'].includes(u.protocol)){origin=u.origin;path=u.pathname;}}catch{}const r=f.getBoundingClientRect();return{srcPresent:Boolean(src),srcdocPresent:f.hasAttribute('srcdoc'),origin,path,visible:r.width>0&&r.height>0};});return {passwordFieldPresent:Boolean(document.querySelector('input[type=password]')),vistaRows,title:document.title.slice(0,150),heading:[...document.querySelectorAll('h1,h2')].map(h=>(h.innerText||'').slice(0,100)).slice(0,6),textLength:text.length,frames,challengeWording:/verify you are human|checking your browser|access denied/i.test(text),vistaWordPresent:/\bVista\b/i.test(text),explicitVistaCityWording:/city of vista|vista,?\s+(?:ca|california)/i.test(text),links:[...new Map(links.map(x=>[x.url,x])).values()].slice(0,20),selectCount:document.querySelectorAll('select').length,iframeCount:document.querySelectorAll('iframe').length};
-              });
-              report.sourcePageKind = view.challengeWording ? 'publisher-challenge' : 'rendered-city-published-hosted-entry';
-              report.passwordFieldPresent=view.passwordFieldPresent;report.pageIdentity={title:view.title,headings:view.heading,textLength:view.textLength,frames:view.frames};
-              report.vistaWordPresent = view.vistaWordPresent;
-              report.explicitVistaCityWording = view.explicitVistaCityWording;
-              report.publishedNavigationLinks = view.challengeWording ? [] : view.links;
-              report.selectCount = view.selectCount;report.iframeCount = view.iframeCount;
-            } else {
-              report.sourcePageKind = 'other-http-response';
-            }
+            stage='published-public-gis-metadata';
+            context.on('request',()=>{if(++report.sourceRequests>report.maximumSourceRequests)void context.close().catch(()=>{});});
+            const target='https://app06.cityworksonline.com/CLIENT_VistaCA-Office/gis/16/4700/rest/services/cw/FeatureServer?f=pjson';
+            const response=await page.goto(target,{waitUntil:'domcontentloaded'});
+            report.sourceNavigationAttempts=1;
+            report.sourceStatus=response?.status()??null;
+            report.sourceRetryAfter=Boolean(response?.headers()['retry-after']);
+            report.sourceDestination={origin:new URL(page.url()).origin,path:new URL(page.url()).pathname};
+            if([401,403,406,429].includes(report.sourceStatus)||report.sourceRetryAfter){report.sourcePageKind='publisher-refusal';}
+            else if(report.sourceStatus===200){
+              let data;try{data=await response.json()}catch{}
+              if(!data){report.sourcePageKind='non-json-response';report.passwordFieldPresent=await page.locator('input[type=password]').count()>0;}
+              else if(data.error){report.sourcePageKind='source-error';report.sourceError={code:data.error.code,message:String(data.error.message||'').slice(0,150)};}
+              else{report.sourcePageKind='public-gis-service-metadata';report.serviceVersion=data.currentVersion;report.layers=(data.layers||[]).map(x=>({id:x.id,name:x.name}));report.tables=(data.tables||[]).map(x=>({id:x.id,name:x.name}));report.capabilities=data.capabilities;}
+            }else report.sourcePageKind='other-http-response';
           } catch (error) {
             report.failedStage = stage;
             report.errorKind = error?.name || 'Error';
@@ -120,4 +95,5 @@ jobs:
             console.log(JSON.stringify(report));
             if (!report.countryVerified || !report.nonCloudflareNetworkVerified || !report.browserClosed) process.exitCode = 1;
           }
+          
           NODE
