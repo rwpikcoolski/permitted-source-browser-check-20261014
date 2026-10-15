@@ -1,4 +1,4 @@
-name: Vista public organization source catalog
+name: Vista complete Enterprise public source catalog
 on:
   workflow_dispatch:
 permissions: {}
@@ -12,17 +12,17 @@ jobs:
     steps:
       - name: Install official browser dependency
         run: npm install --ignore-scripts --no-package-lock playwright@1.64.1
-      - name: Read City organization catalog and published service directory
+      - name: Read complete observed organization catalog with public service URLs
         run: |
           node --input-type=module <<'NODE'
           import {chromium} from 'playwright';
-          const result={purpose:'Find public source items in the observed City Enterprise organization and CWOL directory',checkedAt:new Date().toISOString(),maximumBrowserSeconds:70,maximumSourceRequests:2,sourceRequests:0,browserClosed:false,rawRecordsLogged:false,tests:[]};let browser,timer;
+          const result={purpose:'Complete City Enterprise public item pagination and source references; no feature data',checkedAt:new Date().toISOString(),maximumBrowserSeconds:70,maximumSourceRequests:5,sourceRequests:0,browserClosed:false,rawRecordsLogged:false,tests:[]};let browser,timer;
           try{
            browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});timer=setTimeout(()=>void browser.close().catch(()=>{}),70000);const context=await browser.newContext({acceptDownloads:false});const page=await context.newPage();
            const control=await page.goto('https://ipwho.is/',{waitUntil:'domcontentloaded',timeout:18000});const n=await control.json();if(control.status()!==200||n.success!==true||n.country_code!=='US'||Number(n.connection?.asn)===13335||/cloudflare/i.test(String(n.connection?.org||'')))throw Error('USA_NOT_VERIFIED');result.countryVerified='US';result.independentOfCloudflare=true;
            async function read(label,url){result.sourceRequests++;const r=await context.request.get(url,{timeout:18000,maxRedirects:0});const out={label,httpStatus:r.status(),retryAfter:r.headers()['retry-after']||null};result.tests.push(out);if([401,403,406,429].includes(r.status())||out.retryAfter){out.controlRespected=true;throw Error('SOURCE_CONTROL');}const text=await r.text();if(text.length>3000000)throw Error('SIZE');const j=JSON.parse(text);if(j.error){out.error={code:j.error.code,message:j.error.message};if([401,403,498,499].includes(j.error.code)){out.controlRespected=true;throw Error('SOURCE_CONTROL');}}return {j,out};}
-           const search=new URL('https://gis.vista.gov/portal/sharing/rest/search');search.search=new URLSearchParams({f:'json',q:'orgid:0123456789ABCDEF AND access:public',num:'100',start:'1',sortField:'modified',sortOrder:'desc'});const {j:c,out:co}=await read('observed-city-organization-public-items',search.href);co.query='orgid:0123456789ABCDEF AND access:public';co.total=c.total;co.nextStart=c.nextStart;co.items=(c.results||[]).map(x=>({id:x.id,title:x.title,type:x.type,owner:x.owner,access:x.access}));
-           const {j:d,out:di}=await read('published-cwol-service-directory','https://gis.vista.gov/arcgis/rest/services/CWOL?f=json');di.folders=d.folders;di.services=d.services?.map(x=>({name:x.name,type:x.type}));
+           let start=1;const ids=new Set();while(start>0&&result.sourceRequests<5){const search=new URL('https://gis.vista.gov/portal/sharing/rest/search');search.search=new URLSearchParams({f:'json',q:'orgid:0123456789ABCDEF AND access:public',num:'100',start:String(start),sortField:'modified',sortOrder:'desc'});const {j:c,out:co}=await read('city-public-catalog-page-'+start,search.href);co.total=c.total;co.start=c.start;co.nextStart=c.nextStart;co.items=(c.results||[]).map(x=>{ids.add(x.id);let url;try{const u=new URL(x.url);if(!/token|password|secret|api.?key/i.test(u.search))url=u.origin+u.pathname;}catch{}return {id:x.id,title:x.title,type:x.type,access:x.access,url};});start=c.nextStart;}
+           result.uniqueItems=ids.size;result.nextStart=start;result.catalogComplete=start===-1;
           }catch(e){const m=String(e?.message||'');result.failure=/USA_NOT_VERIFIED/.test(m)?'USA-not-verified':/SOURCE_CONTROL/.test(m)?'source-control-respected':/timeout|Timeout/.test(m)?'timeout':'runtime-error';}
           finally{clearTimeout(timer);if(browser){await browser.close().catch(()=>{});result.browserClosed=!browser.isConnected();}console.log(JSON.stringify(result));if(!result.countryVerified||!result.browserClosed)process.exitCode=1;}
           NODE
