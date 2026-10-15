@@ -20,7 +20,7 @@ jobs:
             browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});timer=setTimeout(()=>void browser.close().catch(()=>{}),70000);
             const context=await browser.newContext({acceptDownloads:false});const page=await context.newPage();
             const control=await page.goto('https://ipwho.is/',{waitUntil:'domcontentloaded',timeout:18000});const n=await control.json();
-            if(control.status()!==200||n.success!==true||n.country_code!=='US'||Number(n.connection?.asn)===13335||/cloudflare/i.test(String(n.connection?.org||'')))throw Error('USA_NOT_VERIFIED');
+            result.networkCheck={status:control.status(),success:n.success===true,country:n.country_code||null,network:n.connection?.org||null};if(control.status()!==200||n.success!==true||n.country_code!=='US'||Number(n.connection?.asn)===13335||/cloudflare/i.test(String(n.connection?.org||'')))throw Error('USA_NOT_VERIFIED');
             result.countryVerified='US';result.independentOfCloudflare=true;
             context.on('request',()=>{result.sourceRequests++;if(result.sourceRequests>160)void context.close().catch(()=>{});});
             result.requests=[];page.on('request',r=>{if(r.resourceType()==='xhr'||r.resourceType()==='fetch'){const u=new URL(r.url());if(u.hostname==='eg.carlsbadca.gov'){const h=r.headers();result.requests.push({path:u.pathname,method:r.method(),tenant:{tenantId:h.tenantid,tenantName:h.tenantname,tenantUrl:h['tyler-tenanturl']}});}}});
