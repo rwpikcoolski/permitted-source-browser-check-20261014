@@ -1,4 +1,4 @@
-name: Vista public permit layer coverage assessment
+name: Vista published GIS query controls
 
 on:
   workflow_dispatch:
@@ -65,16 +65,15 @@ jobs:
             report.nonCloudflareNetworkVerified = true;
             report.networkKind = /microsoft|azure/i.test(organization) ? 'Microsoft/Azure' : 'independent-provider';
             console.log(JSON.stringify({ stage: 'ordinary-browser-USA-outside-Cloudflare-verified', sourceRequests: 0 }));
-            stage='published-permit-layer';
+            stage='public-gis-query-controls';
             context.on('request',()=>{if(++report.sourceRequests>report.maximumSourceRequests)void context.close().catch(()=>{});});
-            const base='https://app06.cityworksonline.com/CLIENT_VistaCA-Office/gis/16/4700/rest/services/cw/FeatureServer/5';
-            const read=async(url)=>{report.sourceNavigationAttempts++;const r=await page.goto(url,{waitUntil:'domcontentloaded'});const status=r?.status();if([401,403,406,429].includes(status)||r?.headers()['retry-after'])throw Error('SOURCE_REFUSAL');if(status!==200)throw Error('SOURCE_HTTP');let d;try{d=await r.json()}catch{throw Error('SOURCE_NOT_JSON')};if(d.error){report.sourceError={code:d.error.code,message:String(d.error.message||'').slice(0,150)};throw Error('SOURCE_ERROR')};return d;};
-            const meta=await read(base+'?f=pjson');
-            report.sourceStatus=200;report.sourcePageKind='public-permit-layer-metadata';
-            report.layer={name:meta.name,objectIdField:meta.objectIdField,capabilities:meta.capabilities,maxRecordCount:meta.maxRecordCount,supportedQueryFormats:meta.supportedQueryFormats,advancedQueryCapabilities:meta.advancedQueryCapabilities,fields:(meta.fields||[]).map(x=>({name:x.name,alias:x.alias,type:x.type,domain:x.domain?.codedValues?x.domain.codedValues.map(c=>({name:c.name,code:c.code})):undefined}))};
-            const count=await read(base+'/query?'+new URLSearchParams({f:'json',where:'1=1',returnCountOnly:'true'}));report.recordCount=count.count;
-            const dates=(meta.fields||[]).filter(x=>x.type==='esriFieldTypeDate').slice(0,12);
-            if(dates.length&&meta.advancedQueryCapabilities?.supportsStatistics){const statistics=dates.map((x,i)=>({statisticType:'max',onStatisticField:x.name,outStatisticFieldName:'maximum_'+i}));const q=await read(base+'/query?'+new URLSearchParams({f:'json',where:'1=1',returnGeometry:'false',outStatistics:JSON.stringify(statistics)}));const a=q.features?.[0]?.attributes||{};report.maximumDates=dates.map((x,i)=>({field:x.name,value:a['maximum_'+i]}));}
+            const base='https://app06.cityworksonline.com/CLIENT_VistaCA-Office/gis/16/4700/rest/services/cw/FeatureServer';
+            const read=async(url)=>{report.sourceNavigationAttempts++;const r=await page.goto(url,{waitUntil:'domcontentloaded'});if([401,403,406,429].includes(r?.status())||r?.headers()['retry-after'])throw Error('SOURCE_REFUSAL');if(r?.status()!==200)throw Error('SOURCE_HTTP');const d=await r.json();if(d.error){report.sourceError={code:d.error.code,message:String(d.error.message||'').slice(0,150)};throw Error('SOURCE_ERROR')};return d;};
+            const countQuery={f:'json',where:'1=1',returnCountOnly:'true'};
+            const inspection=await read(base+'/3/query?'+new URLSearchParams(countQuery));report.publishedInspectionControl={keys:Object.keys(inspection),count:inspection.count};
+            const geometry={xmin:-117.39984078,ymin:33.05725059,xmax:-116.99399836,ymax:33.29999889,spatialReference:{wkid:4326}};
+            const spatial=await read(base+'/5/query?'+new URLSearchParams({...countQuery,geometry:JSON.stringify(geometry),geometryType:'esriGeometryEnvelope',inSR:'4326',spatialRel:'esriSpatialRelIntersects'}));report.permitSpatialControl={keys:Object.keys(spatial),count:spatial.count,scope:'adopted North County envelope; diagnostic only, not City qualification'};
+            report.sourceStatus=200;report.sourcePageKind='public-gis-query-controls-complete';
           } catch (error) {
             report.failedStage = stage;
             report.errorKind = error?.name || 'Error';
