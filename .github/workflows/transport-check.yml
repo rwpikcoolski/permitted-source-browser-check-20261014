@@ -1,4 +1,4 @@
-name: Vista public map dependency review
+name: Vista published public service admission
 on:
   workflow_dispatch:
 permissions: {}
@@ -12,20 +12,17 @@ jobs:
     steps:
       - name: Install official browser dependency
         run: npm install --ignore-scripts --no-package-lock playwright@1.64.1
-      - name: Read publicly returned map metadata and dependencies
+      - name: Inspect City published public map service layers
         run: |
           node --input-type=module <<'NODE'
           import {chromium} from 'playwright';
-          const result={purpose:'Inspect two actual public catalog items for ownership and source references',checkedAt:new Date().toISOString(),maximumBrowserSeconds:70,maximumSourceRequests:4,sourceRequests:0,browserClosed:false,rawRecordsLogged:false,tests:[]};let browser,timer;
+          const result={purpose:'Assess City-owned CWOL Public map service for current building permits',checkedAt:new Date().toISOString(),maximumBrowserSeconds:70,maximumSourceRequests:2,sourceRequests:0,browserClosed:false,rawRecordsLogged:false,tests:[]};let browser,timer;
           try{
            browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});timer=setTimeout(()=>void browser.close().catch(()=>{}),70000);const context=await browser.newContext({acceptDownloads:false});const page=await context.newPage();
            const control=await page.goto('https://ipwho.is/',{waitUntil:'domcontentloaded',timeout:18000});const n=await control.json();if(control.status()!==200||n.success!==true||n.country_code!=='US'||Number(n.connection?.asn)===13335||/cloudflare/i.test(String(n.connection?.org||'')))throw Error('USA_NOT_VERIFIED');result.countryVerified='US';result.independentOfCloudflare=true;
            async function read(label,url){result.sourceRequests++;const r=await context.request.get(url,{timeout:18000,maxRedirects:0});const out={label,httpStatus:r.status(),retryAfter:r.headers()['retry-after']||null};result.tests.push(out);if([401,403,406,429].includes(r.status())||out.retryAfter){out.controlRespected=true;throw Error('SOURCE_CONTROL');}const text=await r.text();if(text.length>3000000)throw Error('SIZE');const j=JSON.parse(text);if(j.error){out.error={code:j.error.code,message:j.error.message};if([401,403,498,499].includes(j.error.code)){out.controlRespected=true;throw Error('SOURCE_CONTROL');}}return {j,out};}
-           function links(v,found=new Set()){if(typeof v==='string'){for(const m of v.matchAll(/https?:[^\s"<>]+/g)){try{const u=new URL(m[0]);if(!/token|password|secret|api.?key/i.test(u.search))found.add(u.origin+u.pathname);}catch{}}}else if(Array.isArray(v)){for(const x of v)links(x,found);}else if(v&&typeof v==='object'){for(const [k,x]of Object.entries(v)){if(!/token|password|secret|credential|api.?key|feature|attribute/i.test(k))links(x,found);}}return found;}
-           for(const id of ['a584ab8da38c4c1587d212b58ab87706','0117a36924e24a9cac68c3c82d99a149']){
-            const base='https://gis.vista.gov/portal/sharing/rest/content/items/'+id;const {j:m,out:mo}=await read(id+'-metadata',base+'?f=json');mo.item={id:m.id,title:m.title,owner:m.owner,orgId:m.orgId,access:m.access,type:m.type,created:m.created,modified:m.modified};
-            if(m.access==='public'){const {j:d,out:da}=await read(id+'-public-data',base+'/data?f=json');da.references=[...links(d)].filter(x=>/cityworks|vista|permit|arcgis/i.test(x));da.layerTitles=(d.operationalLayers||[]).map(x=>({id:x.id,title:x.title,layerIds:x.layers?.map(z=>({id:z.id,title:z.title,name:z.name}))}));}
-           }
+           const base='https://gis.vista.gov/arcgis/rest/services/CWOL/Public/MapServer';const {j:m,out:mo}=await read('published-public-map-service',base+'?f=json');mo.name=m.mapName;mo.capabilities=m.capabilities;mo.description=typeof m.description==='string'?m.description.slice(0,1000):null;mo.layers=m.layers?.map(x=>({id:x.id,name:x.name,parentLayerId:x.parentLayerId,subLayerIds:x.subLayerIds}));
+           const {j:d,out:lo}=await read('published-public-map-layer-schemas',base+'/layers?f=json');lo.layers=(d.layers||[]).map(x=>({id:x.id,name:x.name,type:x.type,capabilities:x.capabilities,supportsStatistics:x.supportsStatistics,advancedQueryCapabilities:x.advancedQueryCapabilities,fields:/permit|solar|building|case/i.test(x.name||'')?x.fields?.map(f=>({name:f.name,alias:f.alias,type:f.type})):undefined}));
           }catch(e){const m=String(e?.message||'');result.failure=/USA_NOT_VERIFIED/.test(m)?'USA-not-verified':/SOURCE_CONTROL/.test(m)?'source-control-respected':/timeout|Timeout/.test(m)?'timeout':'runtime-error';}
           finally{clearTimeout(timer);if(browser){await browser.close().catch(()=>{});result.browserClosed=!browser.isConnected();}console.log(JSON.stringify(result));if(!result.countryVerified||!result.browserClosed)process.exitCode=1;}
           NODE
